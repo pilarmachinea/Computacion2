@@ -1,3 +1,54 @@
+import os
+import time
+
+class CalculadoraCPU:
+    """
+    Mantiene el estado de lecturas anteriores por PID
+    para calcular CPU% instantáneo entre llamadas.
+    """
+    def __init__(self):
+        self._anteriores = {}
+        self._hz = os.sysconf('SC_CLK_TCK')
+
+    def calcular(self, pid, utime, stime):
+        ahora = time.time()
+        jiffies_totales = utime + stime
+
+        anterior = self._anteriores.get(pid)
+        self._anteriores[pid] = (jiffies_totales, ahora)
+
+        if anterior is None:
+            return 0.0
+
+        jiffies_prev, t_prev = anterior
+        delta_jiffies = jiffies_totales - jiffies_prev
+        delta_t = ahora - t_prev
+
+        if delta_t <= 0:
+            return 0.0
+
+        return (delta_jiffies / self._hz) / delta_t * 100
+
+
+def leer_stat(pid):
+    ruta = f"/proc/{pid}/stat"
+    try:
+        with open(ruta, "r") as f:
+            linea = f.read().strip()
+        fin_comm = linea.rfind(')')
+        comm = linea[linea.find('(') + 1:fin_comm]
+        resto = linea[fin_comm + 2:].split()
+        return {
+            "pid": pid,
+            "comm": comm,
+            "state": resto[0],
+            "ppid": int(resto[1]),
+            "utime": int(resto[11]),
+            "stime": int(resto[12]),
+        }
+    except FileNotFoundError:
+        return None
+
 def leer_stat(pid):
     ruta = f"/proc/{pid}/stat"
     try:
