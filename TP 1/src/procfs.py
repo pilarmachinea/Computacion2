@@ -1,6 +1,14 @@
 import os
 import time
 
+def listar_pids():
+    """Devuelve la lista de PIDs activos en el sistema."""
+    pids = []
+    for entrada in os.listdir("/proc"):
+        if entrada.isdigit():
+            pids.append(int(entrada))
+    return pids
+
 class CalculadoraCPU:
     """
     Mantiene el estado de lecturas anteriores por PID

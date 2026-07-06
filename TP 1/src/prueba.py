@@ -1,14 +1,13 @@
-from procfs import leer_stat, CalculadoraCPU
+from recolector import recolector_loop
+import threading
 import time
+
+snapshot = {}
+hilo = threading.Thread(target=recolector_loop, args=(snapshot, 2), daemon=True)
+hilo.start()
+
+time.sleep(5)
+print(f"PIDs en snapshot: {len(snapshot)}")
+print(list(snapshot.items())[:2])
 import os
-
-calc = CalculadoraCPU()
-pid = os.getpid()
-
-for i in range(3):
-    stat = leer_stat(pid)
-    cpu = calc.calcular(pid, stat["utime"], stat["stime"])
-    print(f"vuelta {i}: cpu% = {cpu:.2f}")
-    time.sleep(1)
-    # generamos algo de carga para que se note
-    sum(range(10_000_000))
+print(snapshot.get(os.getpid()))
