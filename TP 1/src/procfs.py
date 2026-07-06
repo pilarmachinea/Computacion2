@@ -1,5 +1,6 @@
 import os
 import time
+import pwd
 
 def listar_pids():
     """Devuelve la lista de PIDs activos en el sistema."""
@@ -127,3 +128,36 @@ def leer_cmdline(pid):
         return ' '.join(p.decode(errors='replace') for p in partes if p)
     except FileNotFoundError:
         return None
+    
+def usuario_de(uid):
+    """Traduce un UID numérico a nombre de usuario. Si no existe, devuelve el UID como string."""
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return str(uid)
+
+
+def resumen_de(pid):
+    stat = leer_stat(pid)
+    status = leer_status(pid)
+    if stat is None or status is None:
+        return None
+
+    uid = int(status["Uid"].split()[0])
+    gid = int(status["Gid"].split()[0])
+    cmdline = leer_cmdline(pid)
+
+    return {
+        "pid": pid,
+        "comm": stat["comm"],
+        "ppid": stat["ppid"],
+        "state": status["State"].split()[0],
+        "threads": int(status["Threads"]),
+        "vmrss_kb": _kb_a_int(status.get("VmRSS", "0 kB")),
+        "uid": uid,
+        "gid": gid,
+        "usuario": usuario_de(uid),
+        "cmdline": cmdline if cmdline else f"[{stat['comm']}]",
+        "utime": stat["utime"],
+        "stime": stat["stime"],
+    }
