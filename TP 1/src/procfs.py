@@ -52,25 +52,10 @@ def leer_stat(pid):
             "comm": comm,
             "state": resto[0],
             "ppid": int(resto[1]),
-            "utime": int(resto[11]),
-            "stime": int(resto[12]),
-        }
-    except FileNotFoundError:
-        return None
-
-def leer_stat(pid):
-    ruta = f"/proc/{pid}/stat"
-    try:
-        with open(ruta, "r") as f:
-            linea = f.read().strip()
-        fin_comm = linea.rfind(')')
-        comm = linea[linea.find('(') + 1:fin_comm]
-        resto = linea[fin_comm + 2:].split()
-        return {
-            "pid": pid,
-            "comm": comm,
-            "state": resto[0],
-            "ppid": int(resto[1]),
+            "minflt": int(resto[7]),
+            "cminflt": int(resto[8]),
+            "majflt": int(resto[9]),
+            "cmajflt": int(resto[10]),
             "utime": int(resto[11]),
             "stime": int(resto[12]),
         }
@@ -161,3 +146,43 @@ def resumen_de(pid):
         "utime": stat["utime"],
         "stime": stat["stime"],
     }
+
+
+def leer_maps(pid):
+    """
+    Lee /proc/<pid>/maps y agrupa los segmentos por categoría,
+    sumando el tamaño total (en bytes) de cada una.
+    Categorías: text, data, heap, stack, shared.
+    """
+    ruta = f"/proc/{pid}/maps"
+    totales = {"text": 0, "data": 0, "heap": 0, "stack": 0, "shared": 0}
+
+    try:
+        with open(ruta, "r") as f:
+            for linea in f:
+                partes = linea.split()
+                rango = partes[0]
+                permisos = partes[1]
+                path = partes[5] if len(partes) > 5 else ""
+
+                inicio_hex, fin_hex = rango.split('-')
+                tamano = int(fin_hex, 16) - int(inicio_hex, 16)
+
+                categoria = _clasificar_segmento(path, permisos)
+                totales[categoria] += tamano
+
+        return totales
+    except FileNotFoundError:
+        return None
+
+
+def _clasificar_segmento(path, permisos):
+    if path == "[heap]":
+        return "heap"
+    if path == "[stack]":
+        return "stack"
+    if path and 'x' in permisos:
+        return "text"
+    if path:
+        return "data"
+    return "shared"
