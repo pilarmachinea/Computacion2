@@ -59,7 +59,7 @@ def leer_stat(pid):
             "utime": int(resto[11]),
             "stime": int(resto[12]),
         }
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
         return None
 
 
@@ -72,7 +72,7 @@ def leer_status(pid):
                 clave, _, valor = linea.partition(':')
                 datos[clave.strip()] = valor.strip()
         return datos
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
         return None
     
 def resumen_de(pid):
@@ -111,7 +111,7 @@ def leer_cmdline(pid):
             return ""
         partes = data.split(b'\x00')
         return ' '.join(p.decode(errors='replace') for p in partes if p)
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
         return None
     
 def usuario_de(uid):
@@ -172,7 +172,7 @@ def leer_maps(pid):
                 totales[categoria] += tamano
 
         return totales
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
         return None
 
 
@@ -186,3 +186,30 @@ def _clasificar_segmento(path, permisos):
     if path:
         return "data"
     return "shared"
+
+def memoria_de(pid):
+    """
+    Combina leer_stat + leer_status + leer_maps y devuelve
+    los campos tipados que necesita la vista Memoria.
+    """
+    stat = leer_stat(pid)
+    status = leer_status(pid)
+    segmentos = leer_maps(pid)
+    if stat is None or status is None or segmentos is None:
+        return None
+
+    return {
+        "pid": pid,
+        "comm": stat["comm"],
+        "vmsize_kb": _kb_a_int(status.get("VmSize", "0 kB")),
+        "vmrss_kb": _kb_a_int(status.get("VmRSS", "0 kB")),
+        "vmdata_kb": _kb_a_int(status.get("VmData", "0 kB")),
+        "vmstk_kb": _kb_a_int(status.get("VmStk", "0 kB")),
+        "vmexe_kb": _kb_a_int(status.get("VmExe", "0 kB")),
+        "vmlib_kb": _kb_a_int(status.get("VmLib", "0 kB")),
+        "vmhwm_kb": _kb_a_int(status.get("VmHWM", "0 kB")),
+        "vmswap_kb": _kb_a_int(status.get("VmSwap", "0 kB")),
+        "minflt": stat["minflt"],
+        "majflt": stat["majflt"],
+        "segmentos": segmentos,  # dict: {text, data, heap, stack, shared} en bytes
+    }
