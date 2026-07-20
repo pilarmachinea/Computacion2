@@ -213,3 +213,44 @@ def memoria_de(pid):
         "majflt": stat["majflt"],
         "segmentos": segmentos,  # dict: {text, data, heap, stack, shared} en bytes
     }
+
+def leer_fds(pid):
+    """
+    Lista los FDs abiertos por un proceso y clasifica cada uno
+    según su destino (tty, socket, pipe, file, dispositivo).
+    """
+    ruta = f"/proc/{pid}/fd"
+    fds = []
+
+    try:
+        entradas = os.listdir(ruta)
+    except (FileNotFoundError, PermissionError):
+        return None
+
+    for fd_num in entradas:
+        try:
+            destino = os.readlink(f"{ruta}/{fd_num}")
+        except (FileNotFoundError, PermissionError):
+            continue
+
+        fds.append({
+            "fd": int(fd_num),
+            "destino": destino,
+            "tipo": _clasificar_fd(destino),
+        })
+
+    return fds
+
+
+def _clasificar_fd(destino):
+    if destino.startswith("socket:"):
+        return "socket"
+    if destino.startswith("pipe:"):
+        return "pipe"
+    if destino.startswith("/dev/pts/") or destino.startswith("/dev/tty"):
+        return "tty"
+    if destino.startswith("/dev/"):
+        return "dispositivo"
+    if destino.startswith("/"):
+        return "file"
+    return "otro"
