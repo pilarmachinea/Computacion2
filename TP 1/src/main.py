@@ -6,6 +6,7 @@ from analizadores.resumen import analizador_resumen_loop
 from analizadores.memoria import analizador_memoria_loop
 from analizadores.fds import analizador_fds_loop
 from analizadores.threads import analizador_threads_loop
+from analizadores.senales import analizador_senales_loop
 
 
 def main():
@@ -15,6 +16,8 @@ def main():
     vista_memoria = manager.list()
     vista_fds = manager.list()
     vista_threads = manager.list()
+    vista_senales = manager.list()
+
 
     procesos = [
         mp.Process(target=recolector_loop, args=(snapshot, 1), daemon=True),
@@ -22,6 +25,7 @@ def main():
         mp.Process(target=analizador_memoria_loop, args=(vista_memoria, 2), daemon=True),
         mp.Process(target=analizador_fds_loop, args=(vista_fds, 3), daemon=True),
         mp.Process(target=analizador_threads_loop, args=(vista_threads, 3), daemon=True),
+        mp.Process(target=analizador_senales_loop, args=(vista_senales, 3), daemon=True),
     ]
 
     for p in procesos:
@@ -45,7 +49,10 @@ def main():
         p.terminate()
     for p in procesos:
         p.join()
-
+        
+    print("\n=== Señales ignoradas (primeros 3 PIDs) ===")
+    for fila in vista_senales[:3]:
+        print(f"  PID {fila['pid']:>6}  ignoradas={fila['ignoradas']}")
 
 if __name__ == "__main__":
     main()

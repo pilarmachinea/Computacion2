@@ -9,7 +9,7 @@ cpu.py y los analizadores/.
 
 import os
 import pwd
-
+import signal
 
 # ---------------------------------------------------------------------------
 # stat: /proc/<pid>/stat y /proc/<pid>/task/<tid>/stat (mismo formato)
@@ -359,3 +359,38 @@ def leer_threads(pid):
 
     threads.sort(key=lambda thread: thread["tid"])
     return threads
+
+def decodificar_mascara_senales(mascara_hex):
+    """
+    Decodifica una máscara hexadecimal de 64 bits (SigBlk, SigIgn, SigCgt,
+    SigPnd, ShdPnd de /proc/<pid>/status) a una lista de nombres de señales.
+    """
+    mascara = int(mascara_hex, 16)
+    nombres = []
+
+    for n in range(1, 65):  # las señales POSIX van de 1 a 64
+        if mascara & (1 << (n - 1)):
+            try:
+                nombres.append(signal.Signals(n).name)
+            except ValueError:
+                nombres.append(f"SIG{n}")  # número sin nombre estándar conocido
+
+    return nombres
+
+def senales_de(pid):
+    """
+    Lee las 5 máscaras de señales de /proc/<pid>/status y las decodifica
+    a nombres legibles.
+    """
+    status = leer_status(pid)
+    if status is None:
+        return None
+
+    return {
+        "pid": pid,
+        "bloqueadas": decodificar_mascara_senales(status.get("SigBlk", "0")),
+        "ignoradas": decodificar_mascara_senales(status.get("SigIgn", "0")),
+        "con_handler": decodificar_mascara_senales(status.get("SigCgt", "0")),
+        "pendientes_proceso": decodificar_mascara_senales(status.get("SigPnd", "0")),
+        "pendientes_grupo": decodificar_mascara_senales(status.get("ShdPnd", "0")),
+    }
