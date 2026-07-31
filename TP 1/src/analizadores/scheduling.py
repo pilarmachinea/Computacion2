@@ -1,15 +1,21 @@
 import time
 from procfs import listar_pids, scheduling_de
 
-
-def analizador_scheduling_loop(vista_compartida, intervalo=3):
+def analizador_scheduling_loop(vista_compartida, config):
     while True:
         filas = []
+
         for pid in listar_pids():
             datos = scheduling_de(pid)
             if datos is not None:
                 filas.append(datos)
 
-        filas_ordenadas = sorted(filas, key=lambda p: p["nonvoluntary_ctxt_switches"], reverse=True)
-        vista_compartida[:] = filas_ordenadas
+        filas.sort(
+            key=lambda p: p["nonvoluntary_ctxt_switches"],
+            reverse=True
+        )
+
+        vista_compartida[:] = filas
+
+        intervalo = config["intervalos"].get("scheduling", 3)
         time.sleep(intervalo)

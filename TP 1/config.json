@@ -1,0 +1,16 @@
+{
+    "intervalos": {
+      "recolector": 1,
+      "resumen": 8,
+      "memoria": 3,
+      "fds": 5,
+      "threads": 2,
+      "senales": 10,
+      "scheduling": 3,
+      "sistema": 2
+    },
+    "filtros_default": {
+      "usuario": null,
+      "estado_minimo_interes": null
+    }
+  }

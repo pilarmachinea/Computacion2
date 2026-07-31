@@ -14,6 +14,25 @@ from analizadores.senales import analizador_senales_loop
 from analizadores.scheduling import analizador_scheduling_loop
 from analizadores.sistema import analizador_sistema_loop
 
+# config.json vive en la RAÍZ del repo, un nivel arriba de src/
+RUTA_CONFIG = os.path.join(os.path.dirname(__file__), "..", "config.json")
+
+def cargar_config_desde_archivo():
+    """Lee config.json. Si no existe o está mal formado, usa defaults razonables."""
+    defaults = {
+        "intervalos": {
+            "recolector": 1, "resumen": 2, "memoria": 3, "fds": 5,
+            "threads": 2, "senales": 10, "scheduling": 3, "sistema": 2,
+        },
+        "filtros_default": {"usuario": None, "estado_minimo_interes": None},
+    }
+    try:
+        with open(RUTA_CONFIG, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"[monitor] No se pudo cargar config.json ({e}), usando defaults.")
+        return defaults
+
 
 class ManejadorSenales:
     """
@@ -62,16 +81,17 @@ def manejar_dump(snapshot):
     print(f"\n[monitor] Snapshot volcado a {nombre_archivo}")
 
 
-def manejar_reload_config():
-    """SIGHUP: recarga config.json (intervalos por vista, filtros default)."""
-    try:
-        with open("config.json", "r") as f:
-            config = json.load(f)
-        print(f"\n[monitor] Configuración recargada: {config}")
-        return config
-    except FileNotFoundError:
-        print("\n[monitor] config.json no encontrado, se ignora el reload.")
-        return None
+def manejar_reload_config(config_compartido):
+    """
+    SIGHUP: relee config.json y actualiza el Manager().dict() compartido.
+    Como todos los analizadores leen config["intervalos"][...] EN CADA
+    VUELTA de su propio loop (no una sola vez al arrancar), el cambio se
+    aplica solo con esto -- no hace falta reiniciar ningún proceso.
+    """
+    nueva_config = cargar_config_desde_archivo()
+    config_compartido.clear()
+    config_compartido.update(nueva_config)
+    print(f"\n[monitor] Configuración recargada: {dict(config_compartido)}")
 
 
 def main():
@@ -79,6 +99,15 @@ def main():
     modo_verbose = False  # toggled por SIGUSR2
 
     manager = mp.Manager()
+
+    config_inicial = cargar_config_desde_archivo()
+    config = manager.dict(config_inicial)
+    # Nota: config["intervalos"] es un dict normal (no proxy anidado) porque
+    # Manager().dict() no crea proxies recursivos para sub-dicts al construir
+    # con un dict inicial -- para leerlo alcanza, pero para MODIFICAR solo
+    # ese sub-dict habría que reasignar la clave completa (config["intervalos"] = {...}),
+    # que es justo lo que hace manejar_reload_config con .clear()+.update().
+
     snapshot = manager.dict()
     vista_resumen = manager.list()
     vista_memoria = manager.list()
@@ -89,14 +118,14 @@ def main():
     vista_sistema = manager.dict()
 
     procesos = [
-        mp.Process(target=recolector_loop, args=(snapshot, 1), daemon=True),
-        mp.Process(target=analizador_resumen_loop, args=(snapshot, vista_resumen, 2), daemon=True),
-        mp.Process(target=analizador_memoria_loop, args=(vista_memoria, 3), daemon=True),
-        mp.Process(target=analizador_fds_loop, args=(vista_fds, 5), daemon=True),
-        mp.Process(target=analizador_threads_loop, args=(vista_threads, 2), daemon=True),
-        mp.Process(target=analizador_senales_loop, args=(vista_senales, 10), daemon=True),
-        mp.Process(target=analizador_scheduling_loop, args=(vista_scheduling, 3), daemon=True),
-        mp.Process(target=analizador_sistema_loop, args=(vista_sistema, 2), daemon=True),
+        mp.Process(target=recolector_loop, args=(snapshot, config), daemon=True),
+        mp.Process(target=analizador_resumen_loop, args=(snapshot, vista_resumen, config), daemon=True),
+        mp.Process(target=analizador_memoria_loop, args=(vista_memoria, config), daemon=True),
+        mp.Process(target=analizador_fds_loop, args=(vista_fds, config), daemon=True),
+        mp.Process(target=analizador_threads_loop, args=(vista_threads, config), daemon=True),
+        mp.Process(target=analizador_senales_loop, args=(vista_senales, config), daemon=True),
+        mp.Process(target=analizador_scheduling_loop, args=(vista_scheduling, config), daemon=True),
+        mp.Process(target=analizador_sistema_loop, args=(vista_sistema, config), daemon=True),
     ]
 
     for p in procesos:
@@ -106,14 +135,14 @@ def main():
     print("  Probá en otra terminal:")
     print(f"    kill -USR1 {os.getpid()}   # dump del snapshot")
     print(f"    kill -USR2 {os.getpid()}   # toggle modo verbose")
-    print(f"    kill -HUP  {os.getpid()}   # recargar config.json")
+    print(f"    kill -HUP  {os.getpid()}   # recargar config.json (intervalos en caliente)")
     print(f"    kill -TERM {os.getpid()}   # shutdown limpio (o Ctrl+C)")
 
     while True:
         signum = manejador.esperar_senal(timeout=1.0)
 
         if signum is None:
-            continue  # timeout: no llegó nada, seguir el loop normalmente
+            continue
 
         if signum in (signal.SIGINT, signal.SIGTERM):
             manejar_shutdown(procesos)
@@ -127,7 +156,7 @@ def main():
             print(f"\n[monitor] Modo verbose: {'ON' if modo_verbose else 'OFF'}")
 
         elif signum == signal.SIGHUP:
-            manejar_reload_config()
+            manejar_reload_config(config)
 
 
 if __name__ == "__main__":
