@@ -402,3 +402,106 @@ def scheduling_de(pid):
         "utime": stat["utime"],
         "stime": stat["stime"],
     }
+
+def leer_stat_global():
+    """
+    Lee la primera línea ('cpu ...') de /proc/stat: contadores acumulados
+    de jiffies del sistema completo, agrupados por categoría.
+    """
+    with open("/proc/stat", "r") as f:
+        primera_linea = f.readline()
+    partes = primera_linea.split()
+    # partes[0] es la palabra "cpu"; los campos numéricos siguen desde partes[1]
+    valores = [int(x) for x in partes[1:]]
+    user, nice, system, idle, iowait = valores[0:5]
+    return {
+        "user": user,
+        "nice": nice,
+        "system": system,
+        "idle": idle,
+        "iowait": iowait,
+    }
+
+def leer_loadavg():
+    """Lee /proc/loadavg: promedios de carga del sistema (1, 5, 15 min)."""
+    with open("/proc/loadavg", "r") as f:
+        partes = f.read().split()
+    return {
+        "load_1min": float(partes[0]),
+        "load_5min": float(partes[1]),
+        "load_15min": float(partes[2]),
+    }
+
+
+def leer_uptime():
+    """Lee /proc/uptime: segundos desde el arranque del sistema."""
+    with open("/proc/uptime", "r") as f:
+        partes = f.read().split()
+    return float(partes[0])
+
+
+def leer_meminfo():
+    """Lee /proc/meminfo: memoria total/libre/buffers/cached/swap, en KB."""
+    datos = {}
+    with open("/proc/meminfo", "r") as f:
+        for linea in f:
+            clave, _, valor = linea.partition(':')
+            datos[clave.strip()] = _kb_a_int(valor.strip())
+    return datos
+
+def contar_procesos_por_estado():
+    estados = {}
+    total = 0
+    zombies = 0
+    total_threads = 0
+    for pid in listar_pids():
+        stat = leer_stat(pid)
+        status = leer_status(pid)
+        if stat is None or status is None:
+            continue
+        total += 1
+        estado = stat["state"]
+        if estado in estados:
+            estados[estado] += 1
+        else:
+            estados[estado] = 1
+        if estado == "Z":
+            zombies += 1
+        total_threads += int(status.get("Threads", "0"))
+    return {
+        "total_procesos": total,
+        "por_estado": estados,
+        "zombies": zombies,
+        "total_threads": total_threads,
+    }
+
+def sistema_global(calc_cpu_global):
+    """
+    Combina todos los datos globales del sistema: CPU%, load average,
+    memoria, conteo de procesos, y uptime.
+    calc_cpu_global: instancia de CalculadoraCPUGlobal (mantiene estado
+    entre llamadas, por eso se pasa desde afuera, no se crea acá adentro).
+    """
+    stat_cpu = leer_stat_global()
+    cpu_pct = calc_cpu_global.calcular(
+        stat_cpu["user"], stat_cpu["nice"], stat_cpu["system"],
+        stat_cpu["idle"], stat_cpu["iowait"]
+    )
+
+    loadavg = leer_loadavg()
+    uptime_seg = leer_uptime()
+    meminfo = leer_meminfo()
+    procesos = contar_procesos_por_estado()
+
+    return {
+        "cpu_pct": cpu_pct,
+        "loadavg": loadavg,
+        "uptime_seg": uptime_seg,
+        "mem_total_kb": meminfo.get("MemTotal", 0),
+        "mem_libre_kb": meminfo.get("MemFree", 0),
+        "mem_buffers_kb": meminfo.get("Buffers", 0),
+        "mem_cached_kb": meminfo.get("Cached", 0),
+        "swap_total_kb": meminfo.get("SwapTotal", 0),
+        "swap_libre_kb": meminfo.get("SwapFree", 0),
+        "procesos": procesos,
+    }
