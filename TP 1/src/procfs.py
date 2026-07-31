@@ -1,6 +1,5 @@
 """
 procfs.py — helpers para leer y parsear archivos de /proc.
-
 Responsabilidad de este módulo: "saber hablar con el sistema" (Linux /proc).
 No sabe nada de multiprocessing, de intervalos de recolección, ni de cómo
 se muestra la información — eso es responsabilidad de recolector.py,
@@ -11,15 +10,16 @@ import os
 import pwd
 import signal
 
-# ---------------------------------------------------------------------------
-# stat: /proc/<pid>/stat y /proc/<pid>/task/<tid>/stat (mismo formato)
-# ---------------------------------------------------------------------------
-
 def _leer_stat_desde_ruta(ruta):
     """
     Parsea un archivo con el formato de /proc/<pid>/stat.
     No agrega pid/tid: eso lo hacen las funciones públicas que sí
     conocen esos valores.
+
+    Nota: sid/pgid son conceptos de PROCESO (y de sesión/grupo de procesos),
+    no de thread individual. El kernel repite el mismo valor del proceso
+    padre en el stat de cada task/<tid>, pero conceptualmente solo tiene
+    sentido interpretarlos a nivel de proceso completo.
     """
     try:
         with open(ruta, "r") as f:
@@ -33,14 +33,20 @@ def _leer_stat_desde_ruta(ruta):
         # índice_en_resto = campo_del_enunciado - 3
         return {
             "comm": comm,
-            "state": resto[0],            # campo 3
-            "ppid": int(resto[1]),        # campo 4
-            "minflt": int(resto[7]),      # campo 10
-            "cminflt": int(resto[8]),     # campo 11
-            "majflt": int(resto[9]),      # campo 12
-            "cmajflt": int(resto[10]),    # campo 13
-            "utime": int(resto[11]),      # campo 14
-            "stime": int(resto[12]),      # campo 15
+            "state": resto[0],             # campo 3
+            "ppid": int(resto[1]),         # campo 4
+            "sid": int(resto[3]),          # campo 6  (session id, a nivel proceso)
+            "pgid": int(resto[4]),         # campo 7  (process group id, a nivel proceso)
+            "minflt": int(resto[7]),       # campo 10
+            "cminflt": int(resto[8]),      # campo 11
+            "majflt": int(resto[9]),       # campo 12
+            "cmajflt": int(resto[10]),     # campo 13
+            "utime": int(resto[11]),       # campo 14
+            "stime": int(resto[12]),       # campo 15
+            "priority": int(resto[15]),    # campo 18
+            "nice": int(resto[16]),        # campo 19
+            "rt_priority": int(resto[37]), # campo 40
+            "policy": int(resto[38]),      # campo 41
         }
     except (FileNotFoundError, PermissionError):
         return None
@@ -61,11 +67,6 @@ def leer_stat_thread(pid, tid):
         datos["pid"] = pid
         datos["tid"] = tid
     return datos
-
-
-# ---------------------------------------------------------------------------
-# status: /proc/<pid>/status y /proc/<pid>/task/<tid>/status (mismo formato)
-# ---------------------------------------------------------------------------
 
 def _leer_status_desde_ruta(ruta):
     """
@@ -92,11 +93,6 @@ def leer_status_thread(pid, tid):
     """Lee /proc/<pid>/task/<tid>/status (mismo formato que status de proceso)."""
     return _leer_status_desde_ruta(f"/proc/{pid}/task/{tid}/status")
 
-
-# ---------------------------------------------------------------------------
-# Helpers de conversión / traducción
-# ---------------------------------------------------------------------------
-
 def _kb_a_int(texto):
     """'9984 kB' -> 9984"""
     return int(texto.split()[0])
@@ -119,9 +115,40 @@ def usuario_de(uid):
         return str(uid)
 
 
-# ---------------------------------------------------------------------------
-# Listado de procesos
-# ---------------------------------------------------------------------------
+def decodificar_mascara_senales(mascara_hex):
+    """
+    Decodifica una máscara hexadecimal de 64 bits (SigBlk, SigIgn, SigCgt,
+    SigPnd, ShdPnd de /proc/<pid>/status) a una lista de nombres de señales.
+    """
+    mascara = int(mascara_hex, 16)
+    nombres = []
+
+    for n in range(1, 65):  # las señales POSIX van de 1 a 64
+        if mascara & (1 << (n - 1)):
+            try:
+                nombres.append(signal.Signals(n).name)
+            except ValueError:
+                nombres.append(f"SIG{n}")  # número sin nombre estándar conocido
+
+    return nombres
+
+# Políticas del scheduler de Linux. A diferencia de las señales, acá no hay
+# un módulo estándar de Python que las traduzca -- son pocas, definidas por
+# el kernel, y prácticamente no cambian, así que un diccionario manual es
+# la solución más simple y razonable.
+POLICIES = {
+    0: "SCHED_OTHER",
+    1: "SCHED_FIFO",
+    2: "SCHED_RR",
+    3: "SCHED_BATCH",
+    5: "SCHED_IDLE",
+    6: "SCHED_DEADLINE",
+}
+
+def nombre_policy(policy):
+    """Traduce el número de política de scheduling (campo 41 de stat) a su nombre."""
+    return POLICIES.get(policy, f"UNKNOWN({policy})")
+
 
 def listar_pids():
     """Devuelve la lista de PIDs activos en el sistema."""
@@ -130,11 +157,6 @@ def listar_pids():
         if entrada.isdigit():
             pids.append(int(entrada))
     return pids
-
-
-# ---------------------------------------------------------------------------
-# cmdline: /proc/<pid>/cmdline
-# ---------------------------------------------------------------------------
 
 def leer_cmdline(pid):
     """
@@ -152,10 +174,6 @@ def leer_cmdline(pid):
     except (FileNotFoundError, PermissionError):
         return None
 
-
-# ---------------------------------------------------------------------------
-# maps: /proc/<pid>/maps — segmentos de memoria virtual agrupados
-# ---------------------------------------------------------------------------
 
 def _clasificar_segmento(path, permisos):
     if path == "[heap]":
@@ -196,10 +214,6 @@ def leer_maps(pid):
     except (FileNotFoundError, PermissionError):
         return None
 
-
-# ---------------------------------------------------------------------------
-# fd: /proc/<pid>/fd — file descriptors abiertos
-# ---------------------------------------------------------------------------
 
 def _clasificar_fd(destino):
     if destino.startswith("socket:"):
@@ -244,9 +258,42 @@ def leer_fds(pid):
     return fds
 
 
-# ---------------------------------------------------------------------------
-# Combinaciones de alto nivel para cada vista
-# ---------------------------------------------------------------------------
+def leer_threads(pid):
+    """
+    Devuelve una lista con info de cada thread (LWP) del proceso pid:
+    tid, comm, state, utime, stime, context switches.
+    """
+    ruta_task = f"/proc/{pid}/task"
+    threads = []
+
+    try:
+        entradas = os.listdir(ruta_task)
+    except (FileNotFoundError, PermissionError):
+        return None
+
+    for entrada in entradas:
+        if not entrada.isdigit():
+            continue
+        tid = int(entrada)
+
+        stat = leer_stat_thread(pid, tid)
+        status = leer_status_thread(pid, tid)
+        if stat is None or status is None:
+            continue
+
+        threads.append({
+            "pid": pid,
+            "tid": tid,
+            "comm": stat["comm"],
+            "state": stat["state"],
+            "utime": stat["utime"],
+            "stime": stat["stime"],
+            "voluntary_ctxt_switches": int(status.get("voluntary_ctxt_switches", "0")),
+            "nonvoluntary_ctxt_switches": int(status.get("nonvoluntary_ctxt_switches", "0")),
+        })
+
+    return threads
+
 
 def resumen_de(pid):
     """
@@ -306,77 +353,6 @@ def memoria_de(pid):
     }
 
 
-def leer_threads(pid):
-    """
-    Devuelve una lista con información de cada thread (LWP):
-    tid, comm, state, utime, stime y cambios de contexto.
-    """
-    ruta_task = f"/proc/{pid}/task"
-    threads = []
-
-    try:
-        entradas = os.listdir(ruta_task)
-    except (FileNotFoundError, PermissionError, ProcessLookupError):
-        return None
-
-    for entrada in entradas:
-        if not entrada.isdigit():
-            continue
-
-        tid = int(entrada)
-
-        stat = leer_stat_thread(pid, tid)
-        status = leer_status_thread(pid, tid)
-
-        if stat is None or status is None:
-            continue
-
-        ruta_comm = f"/proc/{pid}/task/{tid}/comm"
-
-        try:
-            with open(ruta_comm, "r") as archivo:
-                comm = archivo.read().strip()
-        except (FileNotFoundError, PermissionError, ProcessLookupError):
-            continue
-
-        try:
-            threads.append({
-                "pid": pid,
-                "tid": tid,
-                "comm": comm,
-                "state": status.get("State", stat["state"]).split()[0],
-                "utime": stat["utime"],
-                "stime": stat["stime"],
-                "voluntary_ctxt_switches": int(
-                    status.get("voluntary_ctxt_switches", "0")
-                ),
-                "nonvoluntary_ctxt_switches": int(
-                    status.get("nonvoluntary_ctxt_switches", "0")
-                ),
-            })
-        except (IndexError, ValueError):
-            continue
-
-    threads.sort(key=lambda thread: thread["tid"])
-    return threads
-
-def decodificar_mascara_senales(mascara_hex):
-    """
-    Decodifica una máscara hexadecimal de 64 bits (SigBlk, SigIgn, SigCgt,
-    SigPnd, ShdPnd de /proc/<pid>/status) a una lista de nombres de señales.
-    """
-    mascara = int(mascara_hex, 16)
-    nombres = []
-
-    for n in range(1, 65):  # las señales POSIX van de 1 a 64
-        if mascara & (1 << (n - 1)):
-            try:
-                nombres.append(signal.Signals(n).name)
-            except ValueError:
-                nombres.append(f"SIG{n}")  # número sin nombre estándar conocido
-
-    return nombres
-
 def senales_de(pid):
     """
     Lee las 5 máscaras de señales de /proc/<pid>/status y las decodifica
@@ -393,4 +369,36 @@ def senales_de(pid):
         "con_handler": decodificar_mascara_senales(status.get("SigCgt", "0")),
         "pendientes_proceso": decodificar_mascara_senales(status.get("SigPnd", "0")),
         "pendientes_grupo": decodificar_mascara_senales(status.get("ShdPnd", "0")),
+    }
+
+def scheduling_de(pid):
+    """
+    Combina leer_stat + leer_status y devuelve los campos
+    tipados que necesita la vista Scheduling.
+    """
+    stat = leer_stat(pid)
+    status = leer_status(pid)
+
+    if stat is None or status is None:
+        return None
+
+    return {
+        "pid": pid,
+        "comm": stat["comm"],
+        "sid": stat["sid"],
+        "pgid": stat["pgid"],
+        "priority": stat["priority"],
+        "nice": stat["nice"],
+        "rt_priority": stat["rt_priority"],
+        "policy": stat["policy"],
+        "policy_nombre": nombre_policy(stat["policy"]),
+        "cpus_allowed_list": status.get("Cpus_allowed_list", ""),
+        "voluntary_ctxt_switches": int(
+            status.get("voluntary_ctxt_switches", "0")
+        ),
+        "nonvoluntary_ctxt_switches": int(
+            status.get("nonvoluntary_ctxt_switches", "0")
+        ),
+        "utime": stat["utime"],
+        "stime": stat["stime"],
     }

@@ -7,7 +7,7 @@ from analizadores.memoria import analizador_memoria_loop
 from analizadores.fds import analizador_fds_loop
 from analizadores.threads import analizador_threads_loop
 from analizadores.senales import analizador_senales_loop
-
+from analizadores.scheduling import analizador_scheduling_loop
 
 def main():
     manager = mp.Manager()
@@ -17,7 +17,7 @@ def main():
     vista_fds = manager.list()
     vista_threads = manager.list()
     vista_senales = manager.list()
-
+    vista_scheduling = manager.list()
 
     procesos = [
         mp.Process(target=recolector_loop, args=(snapshot, 1), daemon=True),
@@ -26,6 +26,7 @@ def main():
         mp.Process(target=analizador_fds_loop, args=(vista_fds, 3), daemon=True),
         mp.Process(target=analizador_threads_loop, args=(vista_threads, 3), daemon=True),
         mp.Process(target=analizador_senales_loop, args=(vista_senales, 3), daemon=True),
+        mp.Process(target=analizador_scheduling_loop, args=(vista_scheduling, 3), daemon=True),
     ]
 
     for p in procesos:
@@ -53,6 +54,11 @@ def main():
     print("\n=== Señales ignoradas (primeros 3 PIDs) ===")
     for fila in vista_senales[:3]:
         print(f"  PID {fila['pid']:>6}  ignoradas={fila['ignoradas']}")
+
+    print("\n=== Top 3 por context switches involuntarios ===")
+    for fila in vista_scheduling[:3]:
+        print(f"  PID {fila['pid']:>6}  {fila['comm']:<15}  policy={fila['policy_nombre']:<12}  "
+            f"nice={fila['nice']:>3}  nonvol_cs={fila['nonvoluntary_ctxt_switches']}")
 
 if __name__ == "__main__":
     main()
