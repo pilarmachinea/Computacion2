@@ -13,6 +13,7 @@ from analizadores.threads import analizador_threads_loop
 from analizadores.senales import analizador_senales_loop
 from analizadores.scheduling import analizador_scheduling_loop
 from analizadores.sistema import analizador_sistema_loop
+from display import display_loop
 
 # config.json vive en la RAÍZ del repo, un nivel arriba de src/
 RUTA_CONFIG = os.path.join(os.path.dirname(__file__), "..", "config.json")
@@ -80,23 +81,20 @@ def manejar_dump(snapshot):
         json.dump(copia, f, indent=2, default=str)
     print(f"\n[monitor] Snapshot volcado a {nombre_archivo}")
 
+
 def manejar_reload_config(intervalos):
-    """
-    SIGHUP: relee config.json y actualiza los Value compartidos.
-    """
+    """SIGHUP: relee config.json y actualiza los Value compartidos."""
     nueva_config = cargar_config_desde_archivo()
-
     nuevos = nueva_config.get("intervalos", {})
-
     for nombre, value in intervalos.items():
         if nombre in nuevos:
             value.value = float(nuevos[nombre])
-
     print("\n[monitor] Intervalos recargados desde config.json")
+
 
 def main():
     manejador = ManejadorSenales()
-    modo_verbose = False  # toggled por SIGUSR2
+    modo_verbose = False  # toggled por SIGUSR2 (a nivel monitor completo)
 
     manager = mp.Manager()
 
@@ -122,6 +120,20 @@ def main():
     vista_scheduling = manager.list()
     vista_sistema = manager.dict()
 
+    # display.py necesita acceder a las 7 vistas por nombre -> las agrupamos
+    # en un dict simple (no Manager, es solo para pasarle referencias ya
+    # creadas al proceso de display; cada valor individual SÍ es un proxy
+    # real de Manager, eso es lo que importa).
+    vistas_compartidas = {
+        "resumen": vista_resumen,
+        "memoria": vista_memoria,
+        "fds": vista_fds,
+        "threads": vista_threads,
+        "senales": vista_senales,
+        "scheduling": vista_scheduling,
+        "sistema": vista_sistema,
+    }
+
     procesos = [
         mp.Process(target=recolector_loop, args=(snapshot, intervalos["recolector"]), daemon=True),
         mp.Process(target=analizador_resumen_loop, args=(snapshot, vista_resumen, intervalos["resumen"]), daemon=True),
@@ -131,13 +143,18 @@ def main():
         mp.Process(target=analizador_senales_loop, args=(vista_senales, intervalos["senales"]), daemon=True),
         mp.Process(target=analizador_scheduling_loop, args=(vista_scheduling, intervalos["scheduling"]), daemon=True),
         mp.Process(target=analizador_sistema_loop, args=(vista_sistema, intervalos["sistema"]), daemon=True),
+        mp.Process(target=display_loop, args=(vistas_compartidas, intervalos), daemon=True),
     ]
 
     for p in procesos:
         p.start()
 
+    # Con display.py tomando la pantalla completa (rich.Live screen=True),
+    # ya no tiene sentido que main.py imprima nada mientras el monitor corre
+    # -- solo mensajes de arranque/cierre, antes/después de que display
+    # tome control de la terminal.
     print("[monitor] Corriendo. PID:", os.getpid())
-    print("  Probá en otra terminal:")
+    print("  Señales disponibles desde otra terminal:")
     print(f"    kill -USR1 {os.getpid()}   # dump del snapshot")
     print(f"    kill -USR2 {os.getpid()}   # toggle modo verbose")
     print(f"    kill -HUP  {os.getpid()}   # recargar config.json (intervalos en caliente)")
@@ -158,7 +175,6 @@ def main():
 
         elif signum == signal.SIGUSR2:
             modo_verbose = not modo_verbose
-            print(f"\n[monitor] Modo verbose: {'ON' if modo_verbose else 'OFF'}")
 
         elif signum == signal.SIGHUP:
             manejar_reload_config(intervalos)
