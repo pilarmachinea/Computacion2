@@ -1,8 +1,10 @@
 import time
 from procfs import listar_pids, leer_threads
+from procesos import restaurar_senales_hijo
 
 
 def analizador_threads_loop(vista_compartida, config):
+    restaurar_senales_hijo()
     while True:
         filas = []
 

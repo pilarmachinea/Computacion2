@@ -1,8 +1,11 @@
 import time
 from procfs import sistema_global
+from procesos import restaurar_senales_hijo
 from cpu import CalculadoraCPUGlobal
 
 def analizador_sistema_loop(vista_compartida, config):
+    restaurar_senales_hijo()
+
     calc_cpu_global = CalculadoraCPUGlobal()
 
     while True:

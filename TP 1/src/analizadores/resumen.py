@@ -1,6 +1,8 @@
 import time
+from procesos import restaurar_senales_hijo
 
 def analizador_resumen_loop(snapshot_recolector, vista_compartida, config):
+    restaurar_senales_hijo()
     while True:
         filas = list(snapshot_recolector.values())
         filas_ordenadas = sorted(

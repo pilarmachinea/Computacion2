@@ -1,8 +1,9 @@
 import time
 from procfs import listar_pids, memoria_de
-
+from procesos import restaurar_senales_hijo
 
 def analizador_memoria_loop(vista_compartida, config):
+    restaurar_senales_hijo()
     while True:
         filas = []
 

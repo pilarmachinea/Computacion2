@@ -1,7 +1,9 @@
 import time
 from procfs import listar_pids, senales_de
+from procesos import restaurar_senales_hijo
 
 def analizador_senales_loop(vista_compartida, config):
+    restaurar_senales_hijo()
     while True:
         filas = []
 
