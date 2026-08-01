@@ -2,7 +2,7 @@ import time
 from procfs import listar_pids, memoria_de
 from procesos import restaurar_senales_hijo
 
-def analizador_memoria_loop(vista_compartida, config):
+def analizador_memoria_loop(vista_compartida, intervalo):
     restaurar_senales_hijo()
     while True:
         filas = []
@@ -15,5 +15,4 @@ def analizador_memoria_loop(vista_compartida, config):
         filas.sort(key=lambda p: p["vmrss_kb"], reverse=True)
         vista_compartida[:] = filas
 
-        intervalo = config["intervalos"].get("memoria", 3)
-        time.sleep(intervalo)
+        time.sleep(intervalo.value)

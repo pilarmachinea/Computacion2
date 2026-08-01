@@ -4,7 +4,7 @@ from procesos import restaurar_senales_hijo
 from cpu import CalculadoraCPU
 
 
-def recolector_loop(snapshot_compartido, config):
+def recolector_loop(snapshot_compartido, intervalo):
     restaurar_senales_hijo()
     calc_cpu = CalculadoraCPU()
 
@@ -27,5 +27,4 @@ def recolector_loop(snapshot_compartido, config):
 
         snapshot_compartido.update(nuevo_snapshot)
 
-        intervalo = config["intervalos"].get("recolector", 1)
-        time.sleep(intervalo)
+        time.sleep(intervalo.value)

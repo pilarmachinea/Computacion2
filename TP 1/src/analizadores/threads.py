@@ -3,7 +3,7 @@ from procfs import listar_pids, leer_threads
 from procesos import restaurar_senales_hijo
 
 
-def analizador_threads_loop(vista_compartida, config):
+def analizador_threads_loop(vista_compartida, intervalo):
     restaurar_senales_hijo()
     while True:
         filas = []
@@ -24,5 +24,4 @@ def analizador_threads_loop(vista_compartida, config):
 
         vista_compartida[:] = filas
 
-        intervalo = config["intervalos"].get("threads", 2)
-        time.sleep(intervalo)
+        time.sleep(intervalo.value)

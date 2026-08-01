@@ -80,19 +80,19 @@ def manejar_dump(snapshot):
         json.dump(copia, f, indent=2, default=str)
     print(f"\n[monitor] Snapshot volcado a {nombre_archivo}")
 
-
-def manejar_reload_config(config_compartido):
+def manejar_reload_config(intervalos):
     """
-    SIGHUP: relee config.json y actualiza el Manager().dict() compartido.
-    Como todos los analizadores leen config["intervalos"][...] EN CADA
-    VUELTA de su propio loop (no una sola vez al arrancar), el cambio se
-    aplica solo con esto -- no hace falta reiniciar ningún proceso.
+    SIGHUP: relee config.json y actualiza los Value compartidos.
     """
     nueva_config = cargar_config_desde_archivo()
-    config_compartido.clear()
-    config_compartido.update(nueva_config)
-    print(f"\n[monitor] Configuración recargada: {dict(config_compartido)}")
 
+    nuevos = nueva_config.get("intervalos", {})
+
+    for nombre, value in intervalos.items():
+        if nombre in nuevos:
+            value.value = float(nuevos[nombre])
+
+    print("\n[monitor] Intervalos recargados desde config.json")
 
 def main():
     manejador = ManejadorSenales()
@@ -101,12 +101,17 @@ def main():
     manager = mp.Manager()
 
     config_inicial = cargar_config_desde_archivo()
-    config = manager.dict(config_inicial)
-    # Nota: config["intervalos"] es un dict normal (no proxy anidado) porque
-    # Manager().dict() no crea proxies recursivos para sub-dicts al construir
-    # con un dict inicial -- para leerlo alcanza, pero para MODIFICAR solo
-    # ese sub-dict habría que reasignar la clave completa (config["intervalos"] = {...}),
-    # que es justo lo que hace manejar_reload_config con .clear()+.update().
+
+    intervalos = {
+        "recolector": mp.Value("d", config_inicial["intervalos"]["recolector"]),
+        "resumen": mp.Value("d", config_inicial["intervalos"]["resumen"]),
+        "memoria": mp.Value("d", config_inicial["intervalos"]["memoria"]),
+        "fds": mp.Value("d", config_inicial["intervalos"]["fds"]),
+        "threads": mp.Value("d", config_inicial["intervalos"]["threads"]),
+        "senales": mp.Value("d", config_inicial["intervalos"]["senales"]),
+        "scheduling": mp.Value("d", config_inicial["intervalos"]["scheduling"]),
+        "sistema": mp.Value("d", config_inicial["intervalos"]["sistema"]),
+    }
 
     snapshot = manager.dict()
     vista_resumen = manager.list()
@@ -118,14 +123,14 @@ def main():
     vista_sistema = manager.dict()
 
     procesos = [
-        mp.Process(target=recolector_loop, args=(snapshot, config), daemon=True),
-        mp.Process(target=analizador_resumen_loop, args=(snapshot, vista_resumen, config), daemon=True),
-        mp.Process(target=analizador_memoria_loop, args=(vista_memoria, config), daemon=True),
-        mp.Process(target=analizador_fds_loop, args=(vista_fds, config), daemon=True),
-        mp.Process(target=analizador_threads_loop, args=(vista_threads, config), daemon=True),
-        mp.Process(target=analizador_senales_loop, args=(vista_senales, config), daemon=True),
-        mp.Process(target=analizador_scheduling_loop, args=(vista_scheduling, config), daemon=True),
-        mp.Process(target=analizador_sistema_loop, args=(vista_sistema, config), daemon=True),
+        mp.Process(target=recolector_loop, args=(snapshot, intervalos["recolector"]), daemon=True),
+        mp.Process(target=analizador_resumen_loop, args=(snapshot, vista_resumen, intervalos["resumen"]), daemon=True),
+        mp.Process(target=analizador_memoria_loop, args=(vista_memoria, intervalos["memoria"]), daemon=True),
+        mp.Process(target=analizador_fds_loop, args=(vista_fds, intervalos["fds"]), daemon=True),
+        mp.Process(target=analizador_threads_loop, args=(vista_threads, intervalos["threads"]), daemon=True),
+        mp.Process(target=analizador_senales_loop, args=(vista_senales, intervalos["senales"]), daemon=True),
+        mp.Process(target=analizador_scheduling_loop, args=(vista_scheduling, intervalos["scheduling"]), daemon=True),
+        mp.Process(target=analizador_sistema_loop, args=(vista_sistema, intervalos["sistema"]), daemon=True),
     ]
 
     for p in procesos:
@@ -156,7 +161,7 @@ def main():
             print(f"\n[monitor] Modo verbose: {'ON' if modo_verbose else 'OFF'}")
 
         elif signum == signal.SIGHUP:
-            manejar_reload_config(config)
+            manejar_reload_config(intervalos)
 
 
 if __name__ == "__main__":

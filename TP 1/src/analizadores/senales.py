@@ -2,7 +2,7 @@ import time
 from procfs import listar_pids, senales_de
 from procesos import restaurar_senales_hijo
 
-def analizador_senales_loop(vista_compartida, config):
+def analizador_senales_loop(vista_compartida, intervalo):
     restaurar_senales_hijo()
     while True:
         filas = []
@@ -16,5 +16,4 @@ def analizador_senales_loop(vista_compartida, config):
 
         vista_compartida[:] = filas
 
-        intervalo = config["intervalos"].get("senales", 10)
-        time.sleep(intervalo)
+        time.sleep(intervalo.value)

@@ -3,7 +3,7 @@ from procfs import sistema_global
 from procesos import restaurar_senales_hijo
 from cpu import CalculadoraCPUGlobal
 
-def analizador_sistema_loop(vista_compartida, config):
+def analizador_sistema_loop(vista_compartida, intervalo):
     restaurar_senales_hijo()
 
     calc_cpu_global = CalculadoraCPUGlobal()
@@ -14,5 +14,4 @@ def analizador_sistema_loop(vista_compartida, config):
         vista_compartida.clear()
         vista_compartida.update(datos)
 
-        intervalo = config["intervalos"].get("sistema", 2)
-        time.sleep(intervalo)
+        time.sleep(intervalo.value)

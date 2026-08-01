@@ -1,7 +1,7 @@
 import time
 from procesos import restaurar_senales_hijo
 
-def analizador_resumen_loop(snapshot_recolector, vista_compartida, config):
+def analizador_resumen_loop(snapshot_recolector, vista_compartida, intervalo):
     restaurar_senales_hijo()
     while True:
         filas = list(snapshot_recolector.values())
@@ -13,5 +13,4 @@ def analizador_resumen_loop(snapshot_recolector, vista_compartida, config):
 
         vista_compartida[:] = filas_ordenadas
 
-        intervalo = config["intervalos"].get("resumen", 2)
-        time.sleep(intervalo)
+        time.sleep(intervalo.value)

@@ -2,7 +2,7 @@ import time
 from procfs import listar_pids, leer_fds
 from procesos import restaurar_senales_hijo
 
-def analizador_fds_loop(vista_compartida, config):
+def analizador_fds_loop(vista_compartida, intervalo):
     restaurar_senales_hijo()
     while True:
         filas = []
@@ -23,5 +23,4 @@ def analizador_fds_loop(vista_compartida, config):
 
         vista_compartida[:] = filas
 
-        intervalo = config["intervalos"].get("fds", 5)
-        time.sleep(intervalo)
+        time.sleep(intervalo.value)
