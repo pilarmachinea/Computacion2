@@ -187,7 +187,7 @@ ARMADORES_TABLA = {
 }
 
 
-def armar_layout(vista_actual, vistas_compartidas, intervalos, pid_pineado, modo_verbose):
+def armar_layout(vista_actual, vistas_compartidas, intervalos, pid_pineado, modo_verbose, ultimo_evento=""):
     """Arma el frame completo que se muestra en cada refresco."""
     layout = Layout()
 
@@ -199,24 +199,32 @@ def armar_layout(vista_actual, vistas_compartidas, intervalos, pid_pineado, modo
         contenido = armador(filas, pid_pineado)
 
     intervalo_actual = intervalos[vista_actual].value
-    pie = Text(
+    linea_atajos = Text(
         f" [1-7] cambiar vista | [+/-] intervalo ({intervalo_actual:.1f}s) | "
         f"[p] pin PID | [q] salir | verbose={'ON' if modo_verbose else 'OFF'} ",
         style="dim",
     )
+    partes_pie = [linea_atajos]
+    if ultimo_evento:
+        partes_pie.append(Text(f" >> {ultimo_evento}", style="bold green"))
 
     layout.split_column(
         Layout(Panel(f"Monitor de Procesos — Vista: {vista_actual.upper()}", style="bold cyan"), size=3),
         Layout(contenido),
-        Layout(pie, size=1),
+        Layout(Text("\n").join(partes_pie) if len(partes_pie) > 1 else linea_atajos, size=2),
     )
     return layout
 
 
-def display_loop(vistas_compartidas, intervalos, modo_verbose_value=None):
+def display_loop(vistas_compartidas, intervalos, cola_eventos):
     """
     Proceso principal de la interfaz. Lanzado por main.py como
     multiprocessing.Process, igual que el resto.
+
+    cola_eventos: multiprocessing.Queue por la que main.py comunica
+    eventos (dump generado, config recargada, etc.) SIN escribir
+    directamente a la terminal -- solo display.py controla la pantalla
+    mientras rich.Live está activo.
     """
     from procesos import restaurar_senales_hijo
     restaurar_senales_hijo()
@@ -231,12 +239,11 @@ def display_loop(vistas_compartidas, intervalos, modo_verbose_value=None):
     vista_actual = "resumen"
     pid_pineado = None
     modo_verbose = False
+    ultimo_evento = ""
 
     try:
         with Live(refresh_per_second=4, screen=True) as live:
             while True:
-                # Procesar TODAS las teclas pendientes en la cola (no solo una),
-                # para no acumular input si el usuario tipeó rápido.
                 while not cola_teclas.empty():
                     tecla = cola_teclas.get_nowait()
 
@@ -260,8 +267,13 @@ def display_loop(vistas_compartidas, intervalos, modo_verbose_value=None):
                     elif tecla == "v":
                         modo_verbose = not modo_verbose
 
+                # Consumir eventos de main.py (sin bloquear). Se queda con
+                # el más reciente para mostrarlo en el pie de la pantalla.
+                while not cola_eventos.empty():
+                    ultimo_evento = cola_eventos.get_nowait()
+
                 live.update(armar_layout(vista_actual, vistas_compartidas, intervalos,
-                                          pid_pineado, modo_verbose))
+                                          pid_pineado, modo_verbose, ultimo_evento))
                 time.sleep(0.1)
     finally:
         detener_evento.set()
