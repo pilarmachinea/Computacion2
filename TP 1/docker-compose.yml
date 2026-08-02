@@ -1,0 +1,15 @@
+services:
+  monitor:
+    build: .
+    container_name: monitor-procesos
+    # Necesario para que /dev/tty exista y funcione dentro del contenedor:
+    # display.py lo abre directamente para leer el teclado (ver notas_teoricas.md,
+    # sesión 11). Sin estas dos flags, Docker no asigna una pseudo-terminal
+    # interactiva y open('/dev/tty') fallaría aunque el código esté bien.
+    tty: true
+    stdin_open: true
+    # Bind mount de config.json: permite editar el archivo en la máquina host
+    # mientras el contenedor corre, y que un SIGHUP relea la versión actualizada
+    # sin necesidad de reconstruir la imagen ni reiniciar el contenedor.
+    volumes:
+      - ./config.json:/app/config.json

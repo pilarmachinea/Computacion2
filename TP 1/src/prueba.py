@@ -1,13 +1,10 @@
-from recolector import recolector_loop
-import threading
+from procfs import sistema_global
+from cpu import CalculadoraCPUGlobal
+
+calc = CalculadoraCPUGlobal()
+print(sistema_global(calc))
+
 import time
-
-snapshot = {}
-hilo = threading.Thread(target=recolector_loop, args=(snapshot, 2), daemon=True)
-hilo.start()
-
-time.sleep(5)
-print(f"PIDs en snapshot: {len(snapshot)}")
-print(list(snapshot.items())[:2])
-import os
-print(snapshot.get(os.getpid()))
+print(sistema_global(calc))
+time.sleep(2)
+print(sistema_global(calc))

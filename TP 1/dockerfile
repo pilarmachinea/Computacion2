@@ -1,0 +1,21 @@
+# python:3.12-slim: cumple con el requisito de Python 3.11+, ya trae Python
+# instalado, e imagen liviana -- no se necesita nada especial del SO,
+# solo Python y acceso a /proc (que el kernel del host expone al contenedor).
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copiar solo requirements.txt primero, e instalar dependencias ANTES de
+# copiar el resto del código: así Docker cachea la capa de "pip install"
+# y no la vuelve a ejecutar cada vez que cambia un .py, solo cuando cambian
+# las dependencias -- builds mucho más rápidos durante el desarrollo.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Ahora sí, copiar el resto del proyecto.
+COPY config.json .
+COPY src/ ./src/
+
+WORKDIR /app/src
+
+CMD ["python3", "main.py"]
