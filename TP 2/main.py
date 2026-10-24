@@ -6,13 +6,23 @@ from uuid import uuid4
 from time import perf_counter
 from typing import Literal
 
+import httpx
+
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class PedidoEspera(BaseModel):
+    tipo: Literal["esperar"] = "esperar"
     # FastAPI valida el JSON antes de ejecutar el endpoint.
     segundos: float = Field(ge=0, le=3600, allow_inf_nan=False)
+    timeout: float = Field(default=30, gt=0, le=3600, allow_inf_nan=False)
+
+
+class PedidoDescarga(BaseModel):
+    tipo: Literal["descargar"]
+    urls: list[HttpUrl] = Field(min_length=1, max_length=20)
+    timeout: float = Field(default=30, gt=0, le=3600, allow_inf_nan=False)
 
 
 Estado = Literal["pendiente", "ejecutando", "completada", "fallida", "cancelada"]
@@ -21,6 +31,41 @@ Estado = Literal["pendiente", "ejecutando", "completada", "fallida", "cancelada"
 async def ejecutar_espera(trabajo):
     await asyncio.sleep(trabajo["segundos"])
     return f"Esperó {trabajo['segundos']} segundos"
+
+
+async def descargar_url(cliente, url):
+    inicio = perf_counter()
+    resultado = {
+        "url": url, "codigo_estado": None, "tamano_bytes": 0, "error": None,
+    }
+    try:
+        # Lee por bloques y cierra la respuesta incluso si se cancela.
+        async with cliente.stream("GET", url) as respuesta:
+            resultado["codigo_estado"] = respuesta.status_code
+            async for bloque in respuesta.aiter_bytes():
+                resultado["tamano_bytes"] += len(bloque)
+    except httpx.HTTPError as error:
+        resultado["error"] = f"{type(error).__name__}: {error}"
+    resultado["tiempo_segundos"] = perf_counter() - inicio
+    return resultado
+
+
+async def ejecutar_descarga(trabajo):
+    # Un cliente compartido por las URLs del trabajo; se cierra al salir.
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10) as cliente:
+        async with asyncio.TaskGroup() as grupo:
+            descargas = [
+                grupo.create_task(descargar_url(cliente, url))
+                for url in trabajo["urls"]
+            ]
+        # TaskGroup espera todas y cancela sus hijas si se cancela el trabajo.
+        return [descarga.result() for descarga in descargas]
+
+
+async def ejecutar_trabajo(trabajo):
+    if trabajo["tipo"] == "descargar":
+        return await ejecutar_descarga(trabajo)
+    return await ejecutar_espera(trabajo)
 
 
 async def worker(cola, tareas, ejecuciones):
@@ -34,9 +79,12 @@ async def worker(cola, tareas, ejecuciones):
             inicio = perf_counter()
             trabajo["estado"] = "ejecutando"
             # Se cancela esta ejecución individual, sin destruir el worker.
-            ejecucion = asyncio.create_task(ejecutar_espera(trabajo))
+            ejecucion = asyncio.create_task(ejecutar_trabajo(trabajo))
             ejecuciones[identificador] = ejecucion
-            trabajo["resultado"] = await ejecucion
+            # El límite cuenta desde que empieza la ejecución, no en la cola.
+            # Al vencer, cancela y espera la limpieza de la ejecución hija.
+            async with asyncio.timeout(trabajo["timeout"]):
+                trabajo["resultado"] = await ejecucion
             trabajo["estado"] = "completada"
         except asyncio.CancelledError:
             trabajo["estado"] = "cancelada"
@@ -44,6 +92,11 @@ async def worker(cola, tareas, ejecuciones):
             # Si cancelaron solamente su trabajo (DELETE), sigue disponible.
             if asyncio.current_task().cancelling():
                 raise
+        except TimeoutError:
+            trabajo["estado"] = "fallida"
+            trabajo["error"] = (
+                f"La tarea superó el timeout de {trabajo['timeout']} segundos"
+            )
         except Exception as error:
             trabajo["estado"] = "fallida"
             trabajo["error"] = str(error)
@@ -81,12 +134,11 @@ app = FastAPI(title="TP2 - Plataforma de tareas", lifespan=lifespan)
 
 
 @app.post("/tareas", status_code=202)
-async def crear_tarea(pedido: PedidoEspera, request: Request):
+async def crear_tarea(pedido: PedidoEspera | PedidoDescarga, request: Request):
     identificador = str(uuid4())
     request.app.state.tareas[identificador] = {
         "id": identificador,
-        "tipo": "esperar",
-        "segundos": pedido.segundos,
+        **pedido.model_dump(mode="json"),
         "estado": "pendiente",
         "resultado": None,
         "error": None,
