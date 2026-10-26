@@ -2,6 +2,8 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+import hashlib
+import threading
 from uuid import uuid4
 from time import perf_counter
 from typing import Literal
@@ -22,6 +24,13 @@ class PedidoEspera(BaseModel):
 class PedidoDescarga(BaseModel):
     tipo: Literal["descargar"]
     urls: list[HttpUrl] = Field(min_length=1, max_length=20)
+    timeout: float = Field(default=30, gt=0, le=3600, allow_inf_nan=False)
+
+
+class PedidoHash(BaseModel):
+    tipo: Literal["hashear"]
+    texto: str = Field(max_length=100_000)
+    iteraciones: int = Field(ge=1, le=100_000_000, strict=True)
     timeout: float = Field(default=30, gt=0, le=3600, allow_inf_nan=False)
 
 
@@ -62,7 +71,42 @@ async def ejecutar_descarga(trabajo):
         return [descarga.result() for descarga in descargas]
 
 
+def calcular_hash(texto, iteraciones, detener):
+    """Función síncrona: se ejecuta en un hilo, fuera del event loop."""
+    datos = texto.encode("utf-8")
+    for numero in range(iteraciones):
+        # Cancelación cooperativa: un hilo no se detiene con Task.cancel().
+        if numero % 1000 == 0 and detener.is_set():
+            return None
+        datos = hashlib.sha256(datos).digest()
+    return datos.hex()
+
+
+async def ejecutar_hash(trabajo):
+    detener = threading.Event()
+    calculo = asyncio.create_task(asyncio.to_thread(
+        calcular_hash, trabajo["texto"], trabajo["iteraciones"], detener
+    ))
+    try:
+        # shield conserva la referencia esperable al cálculo durante la limpieza.
+        resultado = await asyncio.shield(calculo)
+        return {"algoritmo": "sha256", "hash": resultado,
+                "iteraciones": trabajo["iteraciones"]}
+    except asyncio.CancelledError:
+        detener.set()
+        # Esperamos que el cálculo salga, incluso ante cancelaciones repetidas.
+        while not calculo.done():
+            try:
+                await asyncio.shield(calculo)
+            except asyncio.CancelledError:
+                continue
+        calculo.result()
+        raise
+
+
 async def ejecutar_trabajo(trabajo):
+    if trabajo["tipo"] == "hashear":
+        return await ejecutar_hash(trabajo)
     if trabajo["tipo"] == "descargar":
         return await ejecutar_descarga(trabajo)
     return await ejecutar_espera(trabajo)
@@ -134,7 +178,7 @@ app = FastAPI(title="TP2 - Plataforma de tareas", lifespan=lifespan)
 
 
 @app.post("/tareas", status_code=202)
-async def crear_tarea(pedido: PedidoEspera | PedidoDescarga, request: Request):
+async def crear_tarea(pedido: PedidoEspera | PedidoDescarga | PedidoHash, request: Request):
     identificador = str(uuid4())
     request.app.state.tareas[identificador] = {
         "id": identificador,
