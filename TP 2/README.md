@@ -9,7 +9,9 @@ workers implementados como corrutinas. Los endpoints ya operan con tareas reales
 Semana 2: esperar, descargar, hashear, cancelación, timeouts, workers configurables
 y apagado con volcado JSON implementados.
 
-Este es un README inicial, no el informe final. Faltan las tres mediciones obligatorias y el informe con interpretación y reflexión personal.
+Las tres mediciones obligatorias están ejecutadas y documentadas abajo.
+Falta completar el informe final: decisiones de diseño, conceptos del curso,
+limitaciones generales y reflexión personal de la estudiante.
 
 ## Ejecutar en desarrollo
 
@@ -122,3 +124,87 @@ WORKERS=4 APAGADO_TIMEOUT=20 STOP_GRACE_PERIOD=40s docker compose up --build
 
 La imagen usa un solo proceso Uvicorn sin recarga automática. El healthcheck
 consulta `/estadisticas` para comprobar que la API responde.
+
+## Mediciones obligatorias
+
+Resultados ejecutados el 2026-10-27T23:56:09.363874+00:00, en Linux x86_64, Python 3.12.3,
+con 8 CPU lógicas disponibles. Ejecución local fuera de Docker,
+un proceso Uvicorn por servidor y tres workers. Cada escenario se repitió tres
+veces; las tablas muestran medianas. Las muestras originales están en
+[mediciones.json](mediciones.json) y el procedimiento en [medir.py](medir.py).
+
+Para repetir desde el entorno virtual:
+
+```bash
+python medir.py
+```
+
+El script crea servidores en puertos locales libres, usa carpetas temporales
+para los volcados y los detiene al terminar. No utiliza el servidor de desarrollo.
+El modo bloqueante existe solo en el proceso de medición: no cambia `main.py`.
+Al repetir, se reemplaza `mediciones.json`; actualizar estas tablas si cambian los resultados.
+
+### 1. Concurrencia I/O
+
+Veinte descargas HTTP de 1024 bytes cada una desde un servidor local en otro
+proceso. Cada respuesta espera 0,1 segundos con `asyncio.sleep` para simular latencia.
+Se utiliza la misma función `descargar_url` del sistema. La versión secuencial
+hace un `for` con `await`; la concurrente usa `ejecutar_descarga` con TaskGroup.
+Ambas mediciones incluyen crear y cerrar el cliente HTTP. Se verifican códigos
+200, tamaños y ausencia de errores. Son descargas reales por sockets locales,
+con demora simulada; no representan el rendimiento de Internet.
+
+| Ejecución | Tiempo de 20 descargas |
+|---|---:|
+| Secuencial | 2.0994 s |
+| Concurrente | 0.1564 s |
+| Speedup (secuencial / concurrente) | 13.42× |
+
+Las esperas se superponen: la duración concurrente se aproxima a una respuesta
+más el costo de conexiones, cliente y planificación. El speedup es menor que
+20 por esos costos, pero evidencia concurrencia real de I/O.
+
+### 2. Event loop bloqueado
+
+Una tarea de 3.000.000 iteraciones SHA-256 sobre el texto `hola`. En el proceso
+experimental bloqueante se llama directamente a `calcular_hash` desde una
+corrutina; en el normal se utiliza `asyncio.to_thread`. Una marca al inicio del
+cálculo avisa al cliente externo cuándo enviar `GET /tareas`. Se espera que
+termine cada hash antes de comenzar la siguiente repetición.
+
+| Variante | Latencia de GET /tareas | Estado al responder |
+|---|---:|---|
+| Sin executor | 1.1383 s | completada |
+| Con executor de hilos | 0.0160 s | ejecutando |
+
+El GET respondió aproximadamente 71.2 veces más rápido con executor.
+Sin executor, la API solo pudo responder después del cálculo. Con el hilo,
+respondió mientras el trabajo seguía ejecutándose. Esto no demuestra aceleración
+CPU ni paralelismo multinúcleo: el GIL y la competencia por CPU siguen afectando
+la latencia. El objetivo aquí es mantener el event loop disponible.
+
+### 3. Techo del pool
+
+Lotes de tareas `esperar` de 0,15 segundos enviados concurrentemente a un pool
+fijo de tres workers. El tiempo se mide desde el comienzo del envío del lote,
+incluyendo HTTP, espera en cola y ejecución. La finalización se detecta consultando
+`GET /tareas` aproximadamente cada 5 ms; esta observación añade margen a las
+latencias. Cada fila es la mediana de tres lotes; no se mezclan lotes activos.
+
+| Tareas del lote | Tiempo total (s) | Latencia media observada (s) | Tareas/s |
+|---:|---:|---:|---:|
+| 1 | 0.1624 | 0.1624 | 6.16 |
+| 3 | 0.1647 | 0.1647 | 18.22 |
+| 6 | 0.3168 | 0.2420 | 18.94 |
+| 12 | 0.6245 | 0.3977 | 19.22 |
+| 24 | 1.2326 | 0.7062 | 19.47 |
+| 48 | 2.4559 | 1.3160 | 19.54 |
+
+La degradación por cola aparece al superar tres trabajos simultáneos: los
+workers deben atenderlos en tandas. Entre 3 y 48 trabajos la tasa se aproxima
+a 20 tareas/s, el techo teórico de esta carga (3 / 0,15). Aumentar solicitudes
+no aumenta esa capacidad: aumenta el tiempo hasta terminar y la latencia media.
+No es un límite universal de la máquina ni una medición de saturación CPU.
+Con descargas reales o hashes el límite dependerá además de red, GIL y recursos.
+La cola y el historial no tienen límite: cargas sostenidas superiores a la tasa
+de servicio pueden agotar memoria. Esta prueba finita no mide ese agotamiento.
