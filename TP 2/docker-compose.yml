@@ -4,6 +4,9 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
+      CPU_PROCESOS: "${CPU_PROCESOS:-2}"
+      COLA_MAX: "${COLA_MAX:-100}"
+      DESCARGAS_MAX: "${DESCARGAS_MAX:-20}"
       WORKERS: "${WORKERS:-3}"
       APAGADO_TIMEOUT: "${APAGADO_TIMEOUT:-10}"
       ESTADO_DIR: /app/datos

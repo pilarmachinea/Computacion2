@@ -26,7 +26,7 @@ def servidor(modo, carpeta):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         puerto = sock.getsockname()[1]
-    env = dict(os.environ, WORKERS='3', APAGADO_TIMEOUT='1', ESTADO_DIR=str(carpeta / 'estados'))
+    env = dict(os.environ, WORKERS='3', COLA_MAX='100', DESCARGAS_MAX='20', CPU_PROCESOS='2', APAGADO_TIMEOUT='1', ESTADO_DIR=str(carpeta / 'estados'))
     with (carpeta / f'{modo}.log').open('w') as log:
         proceso = subprocess.Popen(
             [sys.executable, '-B', str(Path(__file__).resolve()), '--servidor', modo,
@@ -71,13 +71,13 @@ def iniciar_servidor(args):
         import main
         original = main.ejecutar_hash
 
-        async def hash_medido(trabajo):
+        async def hash_medido(trabajo, recursos, indice):
             # Marca para que el cliente envíe GET mientras el cálculo está activo.
-            Path(args.marca).write_text('inicio')
             if args.servidor == 'bloqueado':
+                Path(args.marca).write_text('inicio')
                 valor = main.calcular_hash(trabajo['texto'], trabajo['iteraciones'], threading.Event())
                 return {'hash': valor}
-            return await original(trabajo)
+            return await original(dict(trabajo, _marca=args.marca), recursos, indice)
 
         main.ejecutar_hash = hash_medido
         app = main.app
@@ -94,7 +94,7 @@ async def medir_io(url):
             sec = [await descargar_url(cliente, u) for u in urls]
         sec_t = time.perf_counter() - inicio
         inicio = time.perf_counter()
-        con = await ejecutar_descarga({'urls': urls})
+        con = await ejecutar_descarga({'urls': urls}, asyncio.Semaphore(20))
         con_t = time.perf_counter() - inicio
         assert all(r['codigo_estado'] == 200 and r['tamano_bytes'] == 1024 and not r['error'] for r in sec + con)
         muestras.append({'secuencial_s': sec_t, 'concurrente_s': con_t})
@@ -147,7 +147,7 @@ async def medir_pool(url):
 def ejecutar():
     datos = {'fecha_utc': datetime.now(timezone.utc).isoformat(),
              'python': sys.version, 'sistema': platform.platform(), 'cpu_logicas': os.cpu_count(),
-             'workers': 3, 'iteraciones_hash': 3_000_000, 'repeticiones': 3}
+             'workers': 3, 'cpu_procesos': 2, 'cola_max': 100, 'descargas_max': 20, 'executor': 'ProcessPoolExecutor (spawn)', 'iteraciones_hash': 3_000_000, 'repeticiones': 3}
     with tempfile.TemporaryDirectory() as tmp:
         carpeta = Path(tmp)
         with servidor('origen', carpeta) as url:

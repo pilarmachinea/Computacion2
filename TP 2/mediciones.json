@@ -1,58 +1,62 @@
 {
-  "fecha_utc": "2026-10-27T23:56:09.363874+00:00",
+  "fecha_utc": "2026-10-28T18:17:24.016160+00:00",
   "python": "3.12.3 (main, Feb  4 2025, 14:48:35) [GCC 13.3.0]",
   "sistema": "Linux-6.8.0-47-generic-x86_64-with-glibc2.39",
   "cpu_logicas": 8,
   "workers": 3,
+  "cpu_procesos": 2,
+  "cola_max": 100,
+  "descargas_max": 20,
+  "executor": "ProcessPoolExecutor (spawn)",
   "iteraciones_hash": 3000000,
   "repeticiones": 3,
   "io": [
     {
-      "secuencial_s": 2.129008388998045,
-      "concurrente_s": 0.15639175600153976
+      "secuencial_s": 2.1136285059983493,
+      "concurrente_s": 0.15638267299800646
     },
     {
-      "secuencial_s": 2.0994245649999357,
-      "concurrente_s": 0.15608784300275147
+      "secuencial_s": 2.0857383140028105,
+      "concurrente_s": 0.14635062800516607
     },
     {
-      "secuencial_s": 2.0978372909994505,
-      "concurrente_s": 0.1574451759988733
+      "secuencial_s": 2.087018899997929,
+      "concurrente_s": 0.13694962900626706
     }
   ],
   "cpu": {
     "bloqueado": [
       {
-        "get_s": 1.1426217230000475,
+        "get_s": 1.1987284510032623,
         "estado_al_responder": "completada",
-        "ejecucion_hash_s": 1.141980667001917
+        "ejecucion_hash_s": 1.1973158190012327
       },
       {
-        "get_s": 1.1382528549984272,
+        "get_s": 1.2536327279958641,
         "estado_al_responder": "completada",
-        "ejecucion_hash_s": 1.1374950149984215
+        "ejecucion_hash_s": 1.2538452120061265
       },
       {
-        "get_s": 1.110725407001155,
+        "get_s": 1.368345610993856,
         "estado_al_responder": "completada",
-        "ejecucion_hash_s": 1.1100428450008621
+        "ejecucion_hash_s": 1.367475047998596
       }
     ],
     "executor": [
       {
-        "get_s": 0.016506416999618523,
+        "get_s": 0.001385641997330822,
         "estado_al_responder": "ejecutando",
-        "ejecucion_hash_s": 1.1882406630029436
+        "ejecucion_hash_s": 1.5498684170015622
       },
       {
-        "get_s": 0.010850834998564096,
+        "get_s": 0.0011077529998146929,
         "estado_al_responder": "ejecutando",
-        "ejecucion_hash_s": 1.1941845000001194
+        "ejecucion_hash_s": 1.2511772889993154
       },
       {
-        "get_s": 0.01599260900184163,
+        "get_s": 0.0027834180000354536,
         "estado_al_responder": "ejecutando",
-        "ejecucion_hash_s": 1.2008605260016338
+        "ejecucion_hash_s": 1.2821208850000403
       }
     ]
   },
@@ -60,128 +64,128 @@
     {
       "cantidad": 1,
       "repeticion": 1,
-      "total_s": 0.15608395500021288,
-      "latencia_media_s": 0.15608395500021288,
-      "tareas_por_s": 6.406808438437097
+      "total_s": 0.1585738380017574,
+      "latencia_media_s": 0.1585738380017574,
+      "tareas_por_s": 6.306210485924655
     },
     {
       "cantidad": 1,
       "repeticion": 2,
-      "total_s": 0.16277324499969836,
-      "latencia_media_s": 0.16277324499969836,
-      "tareas_por_s": 6.14351578480759
+      "total_s": 0.15516805699735414,
+      "latencia_media_s": 0.15516805699735414,
+      "tareas_por_s": 6.444625391017506
     },
     {
       "cantidad": 1,
       "repeticion": 3,
-      "total_s": 0.16242955100096879,
-      "latencia_media_s": 0.16242955100096879,
-      "tareas_por_s": 6.156515202052339
+      "total_s": 0.15650188600557158,
+      "latencia_media_s": 0.15650188600557158,
+      "tareas_por_s": 6.389699354577742
     },
     {
       "cantidad": 3,
       "repeticion": 1,
-      "total_s": 0.1646553939972364,
-      "latencia_media_s": 0.16465314499873784,
-      "tareas_por_s": 18.2198707687059
+      "total_s": 0.16037430599681102,
+      "latencia_media_s": 0.16037378932863552,
+      "tareas_por_s": 18.70623839244956
     },
     {
       "cantidad": 3,
       "repeticion": 2,
-      "total_s": 0.16596444800234167,
-      "latencia_media_s": 0.16596283766799994,
-      "tareas_por_s": 18.076160503710238
+      "total_s": 0.15544319699984044,
+      "latencia_media_s": 0.15544208699672404,
+      "tareas_por_s": 19.299654522694098
     },
     {
       "cantidad": 3,
       "repeticion": 3,
-      "total_s": 0.16145333500026027,
-      "latencia_media_s": 0.16145174999837764,
-      "tareas_por_s": 18.581220387892042
+      "total_s": 0.1559396779994131,
+      "latencia_media_s": 0.15593896633314822,
+      "tareas_por_s": 19.23820825134249
     },
     {
       "cantidad": 6,
       "repeticion": 1,
-      "total_s": 0.3167628750015865,
-      "latencia_media_s": 0.24199215633416316,
-      "tareas_por_s": 18.94161365964982
+      "total_s": 0.3100820489999023,
+      "latencia_media_s": 0.23377265983314524,
+      "tareas_por_s": 19.349717338851466
     },
     {
       "cantidad": 6,
       "repeticion": 2,
-      "total_s": 0.3198502719969838,
-      "latencia_media_s": 0.2432498949977647,
-      "tareas_por_s": 18.758777232043688
+      "total_s": 0.30839569499948993,
+      "latencia_media_s": 0.23430882916485038,
+      "tareas_por_s": 19.45552450078761
     },
     {
       "cantidad": 6,
       "repeticion": 3,
-      "total_s": 0.3138311749971763,
-      "latencia_media_s": 0.23854402733134825,
-      "tareas_por_s": 19.118559525050326
+      "total_s": 0.3101400649975403,
+      "latencia_media_s": 0.23419521649945332,
+      "tareas_por_s": 19.346097706039963
     },
     {
       "cantidad": 12,
       "repeticion": 1,
-      "total_s": 0.6295227570008137,
-      "latencia_media_s": 0.40053377791658323,
-      "tareas_por_s": 19.062059101994446
+      "total_s": 0.6160843850011588,
+      "latencia_media_s": 0.38841409174832126,
+      "tareas_por_s": 19.4778512362027
     },
     {
       "cantidad": 12,
       "repeticion": 2,
-      "total_s": 0.6245042679984181,
-      "latencia_media_s": 0.3976769797497279,
-      "tareas_por_s": 19.215240975791694
+      "total_s": 0.6260909929987974,
+      "latencia_media_s": 0.39765786574571393,
+      "tareas_por_s": 19.166543097071912
     },
     {
       "cantidad": 12,
       "repeticion": 3,
-      "total_s": 0.616125568998541,
-      "latencia_media_s": 0.39156234624927794,
-      "tareas_por_s": 19.476549268203502
+      "total_s": 0.6147753659970476,
+      "latencia_media_s": 0.38753742458296375,
+      "tareas_por_s": 19.519324722028028
     },
     {
       "cantidad": 24,
       "repeticion": 1,
-      "total_s": 1.2294523290001962,
-      "latencia_media_s": 0.6968021413743676,
-      "tareas_por_s": 19.520887011143454
+      "total_s": 1.2278331550041912,
+      "latencia_media_s": 0.6940662262950354,
+      "tareas_por_s": 19.546629688394493
     },
     {
       "cantidad": 24,
       "repeticion": 2,
-      "total_s": 1.24722649099931,
-      "latencia_media_s": 0.7099014027494377,
-      "tareas_por_s": 19.24269583207023
+      "total_s": 1.2212388469997677,
+      "latencia_media_s": 0.6974380494599851,
+      "tareas_por_s": 19.65217537827354
     },
     {
       "cantidad": 24,
       "repeticion": 3,
-      "total_s": 1.2325896389993432,
-      "latencia_media_s": 0.7062379559157913,
-      "tareas_por_s": 19.471200503911415
+      "total_s": 1.2283960139975534,
+      "latencia_media_s": 0.7022281474592091,
+      "tareas_por_s": 19.537673296331455
     },
     {
       "cantidad": 48,
       "repeticion": 1,
-      "total_s": 2.455893369999103,
-      "latencia_media_s": 1.3127527077081897,
-      "tareas_por_s": 19.544822501808184
+      "total_s": 2.4559124109946424,
+      "latencia_media_s": 1.3209065668931241,
+      "tareas_por_s": 19.544670968359185
     },
     {
       "cantidad": 48,
       "repeticion": 2,
-      "total_s": 2.4633936600002926,
-      "latencia_media_s": 1.3244723966254242,
-      "tareas_por_s": 19.485314417832146
+      "total_s": 2.466054108001117,
+      "latencia_media_s": 1.3231302395859832,
+      "tareas_por_s": 19.464293116790873
     },
     {
       "cantidad": 48,
       "repeticion": 3,
-      "total_s": 2.4547019460005686,
-      "latencia_media_s": 1.3159513472299598,
-      "tareas_por_s": 19.554308855381045
+      "total_s": 2.4837209430043004,
+      "latencia_media_s": 1.3344741463559633,
+      "tareas_por_s": 19.325842597252237
     }
   ]
 }

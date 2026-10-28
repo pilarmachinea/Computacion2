@@ -127,87 +127,78 @@ consulta `/estadisticas` para comprobar que la API responde.
 
 ## Mediciones obligatorias
 
-Resultados ejecutados el 2026-10-27T23:56:09.363874+00:00, en Linux x86_64, Python 3.12.3,
-con 8 CPU lógicas disponibles. Ejecución local fuera de Docker,
-un proceso Uvicorn por servidor y tres workers. Cada escenario se repitió tres
-veces; las tablas muestran medianas. Las muestras originales están en
-[mediciones.json](mediciones.json) y el procedimiento en [medir.py](medir.py).
-
-Para repetir desde el entorno virtual:
+Corrida: 2026-10-28T18:17:24.016160+00:00. Python 3.12.3, Linux x86_64,
+8 CPU lógicas. Ejecución local fuera de Docker: 3 workers,
+2 procesos CPU (spawn), cola de 100 y máximo global de 20 descargas.
+Cada escenario se repitió tres veces; se muestran medianas. Las muestras están
+en [mediciones.json](mediciones.json) y el procedimiento en [medir.py](medir.py).
 
 ```bash
 python medir.py
 ```
 
-El script crea servidores en puertos locales libres, usa carpetas temporales
-para los volcados y los detiene al terminar. No utiliza el servidor de desarrollo.
-El modo bloqueante existe solo en el proceso de medición: no cambia `main.py`.
-Al repetir, se reemplaza `mediciones.json`; actualizar estas tablas si cambian los resultados.
+El script inicia servidores temporales en puertos libres y los cierra al finalizar.
+Reemplaza mediciones.json; si se repite, también deben actualizarse las tablas.
+El modo bloqueante solo existe en el servidor experimental, no modifica main.py.
 
 ### 1. Concurrencia I/O
 
-Veinte descargas HTTP de 1024 bytes cada una desde un servidor local en otro
-proceso. Cada respuesta espera 0,1 segundos con `asyncio.sleep` para simular latencia.
-Se utiliza la misma función `descargar_url` del sistema. La versión secuencial
-hace un `for` con `await`; la concurrente usa `ejecutar_descarga` con TaskGroup.
-Ambas mediciones incluyen crear y cerrar el cliente HTTP. Se verifican códigos
-200, tamaños y ausencia de errores. Son descargas reales por sockets locales,
-con demora simulada; no representan el rendimiento de Internet.
+20 descargas HTTP reales de 1024 bytes desde un proceso local que espera 0,1 s
+por respuesta. Se usa descargar_url secuencialmente y ejecutar_descarga con
+TaskGroup y un semáforo de 20. Se verifica código 200, tamaño y ausencia de errores.
+Ambas variantes incluyen creación y cierre del cliente. La demora está simulada:
+no es una medición de Internet.
 
-| Ejecución | Tiempo de 20 descargas |
+| Ejecución | Tiempo |
 |---|---:|
-| Secuencial | 2.0994 s |
-| Concurrente | 0.1564 s |
-| Speedup (secuencial / concurrente) | 13.42× |
+| Secuencial | 2.0870 s |
+| Concurrente | 0.1464 s |
+| Speedup | 14.26× |
 
-Las esperas se superponen: la duración concurrente se aproxima a una respuesta
-más el costo de conexiones, cliente y planificación. El speedup es menor que
-20 por esos costos, pero evidencia concurrencia real de I/O.
+Las esperas se superponen. El resultado concurrente incluye costos de conexiones,
+planificación y cliente, por eso el speedup no llega al ideal de 20.
 
 ### 2. Event loop bloqueado
 
-Una tarea de 3.000.000 iteraciones SHA-256 sobre el texto `hola`. En el proceso
-experimental bloqueante se llama directamente a `calcular_hash` desde una
-corrutina; en el normal se utiliza `asyncio.to_thread`. Una marca al inicio del
-cálculo avisa al cliente externo cuándo enviar `GET /tareas`. Se espera que
-termine cada hash antes de comenzar la siguiente repetición.
+Hash de 3.000.000 iteraciones sobre hola. En la variante bloqueante se llama
+calcular_hash en el loop; en la normal se usa run_in_executor con procesos.
+El cliente externo espera una marca escrita justo antes del cálculo: en la
+variante normal la escribe el proceso hijo, evitando medir solamente el arranque
+del pool. Se espera el resultado de cada hash antes de comenzar otra repetición.
 
-| Variante | Latencia de GET /tareas | Estado al responder |
+| Variante | Latencia GET /tareas | Estado al responder |
 |---|---:|---|
-| Sin executor | 1.1383 s | completada |
-| Con executor de hilos | 0.0160 s | ejecutando |
+| Sin executor | 1.2536 s | completada |
+| ProcessPoolExecutor | 0.0014 s | ejecutando |
 
-El GET respondió aproximadamente 71.2 veces más rápido con executor.
-Sin executor, la API solo pudo responder después del cálculo. Con el hilo,
-respondió mientras el trabajo seguía ejecutándose. Esto no demuestra aceleración
-CPU ni paralelismo multinúcleo: el GIL y la competencia por CPU siguen afectando
-la latencia. El objetivo aquí es mantener el event loop disponible.
+El GET respondió 904.7 veces más rápido con executor. El cálculo fuera
+del loop permite responder antes de que termine. Esta prueba mide respuesta de
+la API con un hash activo; no mide el speedup CPU de múltiples hashes paralelos.
+El arranque de procesos y la serialización tienen costo, aunque la marca evita
+incluir el arranque en la latencia GET.
 
 ### 3. Techo del pool
 
-Lotes de tareas `esperar` de 0,15 segundos enviados concurrentemente a un pool
-fijo de tres workers. El tiempo se mide desde el comienzo del envío del lote,
-incluyendo HTTP, espera en cola y ejecución. La finalización se detecta consultando
-`GET /tareas` aproximadamente cada 5 ms; esta observación añade margen a las
-latencias. Cada fila es la mediana de tres lotes; no se mezclan lotes activos.
+Lotes concurrentes de esperas de 0,15 s con tres workers. Se mide desde el inicio
+del envío hasta observar finalización, incluyendo HTTP y cola. El sondeo de GET
+se repite aproximadamente cada 5 ms y agrega margen a las latencias. No se mezclan
+lotes activos. Cada fila resume tres repeticiones.
 
-| Tareas del lote | Tiempo total (s) | Latencia media observada (s) | Tareas/s |
+| Tareas | Tiempo total (s) | Latencia media observada (s) | Tareas/s |
 |---:|---:|---:|---:|
-| 1 | 0.1624 | 0.1624 | 6.16 |
-| 3 | 0.1647 | 0.1647 | 18.22 |
-| 6 | 0.3168 | 0.2420 | 18.94 |
-| 12 | 0.6245 | 0.3977 | 19.22 |
-| 24 | 1.2326 | 0.7062 | 19.47 |
-| 48 | 2.4559 | 1.3160 | 19.54 |
+| 1 | 0.1565 | 0.1565 | 6.39 |
+| 3 | 0.1559 | 0.1559 | 19.24 |
+| 6 | 0.3101 | 0.2342 | 19.35 |
+| 12 | 0.6161 | 0.3884 | 19.48 |
+| 24 | 1.2278 | 0.6974 | 19.55 |
+| 48 | 2.4661 | 1.3231 | 19.46 |
 
-La degradación por cola aparece al superar tres trabajos simultáneos: los
-workers deben atenderlos en tandas. Entre 3 y 48 trabajos la tasa se aproxima
-a 20 tareas/s, el techo teórico de esta carga (3 / 0,15). Aumentar solicitudes
-no aumenta esa capacidad: aumenta el tiempo hasta terminar y la latencia media.
-No es un límite universal de la máquina ni una medición de saturación CPU.
-Con descargas reales o hashes el límite dependerá además de red, GIL y recursos.
-La cola y el historial no tienen límite: cargas sostenidas superiores a la tasa
-de servicio pueden agotar memoria. Esta prueba finita no mide ese agotamiento.
+Superar tres trabajos agrega espera en cola. La capacidad se aproxima a 20 tareas/s
+(3 / 0,15); aumentar pedidos no crea más capacidad. Esta carga no llena la cola de
+100, por lo que mide saturación del servicio y no rechazo por admisión. La prueba
+verificar_recursos.py sí verifica cola llena y respuesta 503. El historial sigue
+sin límite y puede consumir memoria con cargas sostenidas. Estos resultados no
+son un límite físico universal del equipo.
 
 ## Ejemplos de los tres tipos de tarea
 
@@ -243,8 +234,8 @@ Los registros se modifican en el hilo del event loop. Los bloques de actualizaci
 sin `await` no se intercalan con otras corrutinas, por lo que no necesitan un Lock
 para esas operaciones. Esto no convierte cualquier código asíncrono en atómico:
 un bloque que contiene esperas debe considerar cambios de estado entre ellas.
-El hilo del hash no modifica el diccionario; devuelve un valor y consulta una
-`threading.Event` para recibir la señal de cancelación.
+El proceso del hash no modifica el diccionario; devuelve un valor y consulta un
+`multiprocessing.Event` para recibir la señal de cancelación.
 
 ### I/O y cálculo CPU
 
@@ -265,13 +256,18 @@ de cada URL y las demás descargas continúan. Por eso `completada` para una tar
 de descargas significa que se elaboró el informe, no que todas sus URLs dieron 200.
 
 `calcular_hash` aplica SHA-256 al texto UTF-8 y después a los bytes del digest
-anterior; solo el último digest se convierte a hexadecimal. El bucle es síncrono
-y CPU-bound. Se invoca mediante `asyncio.to_thread`, que utiliza el executor de
-hilos, para no ejecutarlo directamente en el event loop. Esto está permitido por
-la consigna. El GIL limita el paralelismo CPU y puede aumentar la latencia: la
-medición demuestra capacidad de respuesta, no aceleración de los hashes.
-Un ProcessPoolExecutor sería una alternativa para paralelismo multinúcleo,
-a costa de comunicación entre procesos y una cancelación más compleja.
+anterior. El cálculo se delega con `run_in_executor` a un ProcessPoolExecutor
+creado una vez en lifespan. Se usa el contexto spawn en todos los sistemas y una
+función a nivel de módulo para que pueda importarse en los hijos. Cada proceso
+tiene su intérprete: los hashes pueden aprovechar varios núcleos sin competir
+por un único GIL. Los argumentos y resultados se serializan, con un costo adicional.
+
+Un semáforo CPU limita el envío al número de procesos disponibles. Los trabajos
+que esperan capacidad quedan suspendidos en asyncio y se pueden cancelar sin
+esperar que otros cálculos terminen. Cada worker tiene un multiprocessing.Event
+compartido con los procesos mediante el initializer. No se reutiliza su señal
+hasta que el cálculo anterior termina. Ctrl+C se coordina en Uvicorn; los hijos
+ignoran SIGINT y salen de sus cálculos mediante esas señales.
 
 ### Cancelación, timeout y recursos
 
@@ -281,9 +277,9 @@ retirarla de la cola. Una tarea ya completada o fallida devuelve 409.
 
 Al cancelar una descarga, TaskGroup cancela sus corrutinas hijas y los bloques
 `async with` cierran las respuestas y el cliente. Al cancelar un hash, la función
-asíncrona activa la señal de parada y espera la salida del hilo. El bucle consulta
+asíncrona activa la señal de parada y espera la salida del cálculo en el proceso. El bucle consulta
 la señal cada 1000 iteraciones. `shield` permite conservar la espera del cálculo
-para completar su limpieza: cancelar una Task no mata un hilo automáticamente.
+para completar su limpieza: cancelar un Future no detiene un cálculo ya iniciado.
 
 `asyncio.timeout` limita el trabajo desde que empieza a ejecutarse. Su vencimiento
 cancela la ejecución y se registra como `fallida` con motivo. La cancelación manual
@@ -313,7 +309,7 @@ La relación siguiente usa las referencias de clases indicadas en la consigna:
 | 18 | Corrutinas y event loop | `worker`, `ejecutar_espera` y los endpoints usan `async def`; `await` permite suspender sin bloquear el hilo. |
 | 19 | HTTP y FastAPI | Rutas, JSON, validación de pedidos y códigos 202, 404, 409, 422 y 503. |
 | 20–21 | Asyncio en red, colas y cancelación | `AsyncClient`, `asyncio.Queue`, TaskGroup, cancelación y timeout. |
-| 22 | Executors y `concurrent.futures` | `to_thread` delega el hash a un executor de hilos. |
+| 22 | Executors y `concurrent.futures` | `run_in_executor` delega el hash a un ProcessPoolExecutor. |
 | Bloque 0 | Context managers y decoradores | `asynccontextmanager` define el lifespan; `async with` libera recursos y los decoradores registran rutas. |
 
 `asyncio.sleep` suspende una corrutina. `time.sleep` dentro de una corrutina
@@ -325,11 +321,13 @@ proceso y no el event loop del servidor medido.
 
 - El estado vive en un único proceso. Los volcados se detectan pero no se restauran;
   un cierre forzado como SIGKILL o un corte de energía puede perder cambios.
-- La cola y el historial crecen sin límite. Con 10.000 pedidos puede aumentar la
-  espera y el consumo de memoria; GET devuelve la lista completa sin paginación.
-- Cada trabajo admite hasta 20 URLs, pero no existe un límite global de descargas
-  independiente del número de workers. No hay límite total de bytes por URL.
-- Los hashes compiten por CPU y GIL. Más workers no garantizan mayor rendimiento.
+- La cola está acotada y rechaza con 503 al llenarse. El historial de tareas
+  aceptadas sigue sin límite y GET no está paginado: puede crecer la memoria
+  después de muchos pedidos aunque la cola nunca supere su capacidad.
+- Cada trabajo admite hasta 20 URLs y el semáforo limita globalmente las
+  descargas activas. No hay límite total de bytes por URL.
+- Los procesos compiten por CPU y memoria; serializar e iniciar procesos tiene
+  costo. Más workers o procesos no garantizan mayor rendimiento.
 - No hay autenticación, rate limiting ni restricciones de destinos HTTP. Es un
   servicio académico para ejecución controlada, no un servicio público preparado
   para aceptar URLs arbitrarias de usuarios externos.
@@ -349,3 +347,27 @@ Con este TP terminé de entender mejor cómo funciona la programación asíncron
 Lo que más me costó fue entender cómo funcionaban los workers y la cola de tareas, sobre todo por qué necesitábamos guardar las tareas en un diccionario si ya estaban en la cola. También me costó un poco entender cuándo usar `task_done()` y `join()`, pero a medida que fui probando el código lo fui entendiendo mejor.
 
 En las pruebas me sorprendió ver cómo se iban procesando las tareas y que, aunque una fallara, las demás podían seguir ejecutándose. Creo que ver el programa funcionando me ayudó mucho más que solamente leer la teoría.
+
+## Límites de recursos y pruebas de regresión
+
+| Variable | Predeterminado | Qué limita |
+|---|---:|---|
+| WORKERS | 3 | Trabajos tomados por corrutinas consumidoras |
+| CPU_PROCESOS | 2 | Cálculos CPU enviados a procesos simultáneamente |
+| COLA_MAX | 100 | Identificadores pendientes en la cola |
+| DESCARGAS_MAX | 20 | Descargas HTTP activas entre todos los trabajos |
+
+`put_nowait` rechaza inmediatamente con 503 y Retry-After cuando la cola está
+llena. No deja un registro del pedido rechazado. Es control de admisión: a
+diferencia de esperar con `put`, preserva la respuesta rápida de POST.
+Una tarea cancelada aún encolada ocupa su lugar hasta que un worker la retira.
+El semáforo de descargas se comparte en app.state; el timeout incluye la espera
+por un permiso. Los permisos se liberan al completar, fallar o cancelar.
+
+```bash
+python verificar_recursos.py
+```
+
+Comprueba cola llena, ausencia de registros de pedidos rechazados, hash conocido,
+cancelación de hashes activos y esperando capacidad, timeout, reutilización,
+límite de descargas entre dos trabajos y cierre sin procesos hijos vivos.
