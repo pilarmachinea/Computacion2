@@ -10,8 +10,8 @@ Semana 2: esperar, descargar, hashear, cancelación, timeouts, workers configura
 y apagado con volcado JSON implementados.
 
 Las tres mediciones obligatorias están ejecutadas y documentadas abajo.
-Falta completar el informe final: decisiones de diseño, conceptos del curso,
-limitaciones generales y reflexión personal de la estudiante.
+El informe técnico incluye decisiones de diseño, conceptos del curso y limitaciones.
+La reflexión personal está incorporada. Queda pendiente la revisión final del repositorio antes de entregar.
 
 ## Ejecutar en desarrollo
 
@@ -34,7 +34,7 @@ Ctrl+C detiene el servidor de forma ordenada.
 ```text
 Cliente → POST /tareas → diccionario de registros + cola de identificadores
                                                     ↓
-                                            tres workers
+                                       N workers (3 por defecto)
                                                     ↓
                                   esperar / descargar / hashear
                                                     ↓
@@ -208,3 +208,144 @@ No es un límite universal de la máquina ni una medición de saturación CPU.
 Con descargas reales o hashes el límite dependerá además de red, GIL y recursos.
 La cola y el historial no tienen límite: cargas sostenidas superiores a la tasa
 de servicio pueden agotar memoria. Esta prueba finita no mide ese agotamiento.
+
+## Ejemplos de los tres tipos de tarea
+
+```bash
+curl -X POST http://localhost:8000/tareas -H 'Content-Type: application/json' \
+  -d '{"tipo":"esperar","segundos":2,"timeout":10}'
+curl -X POST http://localhost:8000/tareas -H 'Content-Type: application/json' \
+  -d '{"tipo":"descargar","urls":["https://example.com","https://www.python.org"],"timeout":30}'
+curl -X POST http://localhost:8000/tareas -H 'Content-Type: application/json' \
+  -d '{"tipo":"hashear","texto":"hola","iteraciones":1000000,"timeout":30}'
+```
+
+Cada respuesta contiene un identificador que se consulta con GET. Para comprobar
+el timeout, enviar una espera de 60 segundos con `timeout: 2`: termina como
+`fallida` con el motivo. Para comprobar cancelación manual, usar `timeout: 120`
+y enviar DELETE antes de que termine la espera.
+
+## Decisiones de diseño
+
+### Cola asíncrona y estado compartido
+
+Se usa `asyncio.Queue` porque `await cola.get()` suspende la corrutina cuando
+no hay trabajos, permitiendo avanzar al event loop. `queue.Queue.get()` es una
+operación bloqueante diseñada para threads: ejecutarla directamente en el hilo
+de la API podría detener el servidor mientras espera elementos.
+
+El endpoint POST registra el trabajo y encola su identificador. No ejecuta el
+trabajo ni espera `cola.join()`, por eso devuelve 202 inmediatamente después de
+encolarlo. Los workers consumen la cola y actualizan el diccionario compartido.
+`task_done()` se ejecuta en `finally`, incluso ante fallos y cancelaciones.
+
+Los registros se modifican en el hilo del event loop. Los bloques de actualización
+sin `await` no se intercalan con otras corrutinas, por lo que no necesitan un Lock
+para esas operaciones. Esto no convierte cualquier código asíncrono en atómico:
+un bloque que contiene esperas debe considerar cambios de estado entre ellas.
+El hilo del hash no modifica el diccionario; devuelve un valor y consulta una
+`threading.Event` para recibir la señal de cancelación.
+
+### I/O y cálculo CPU
+
+`httpx.AsyncClient` permite esperar respuestas de red sin bloquear el event loop.
+Un cliente por tarea se comparte entre sus URLs y se cierra al finalizar. Las
+respuestas se leen por bloques para contar bytes sin almacenar todo el archivo.
+El tamaño informado corresponde a los bytes del contenido entregado por HTTPX
+tras su decodificación, no al tráfico total sobre la red.
+
+`TaskGroup` inicia las descargas concurrentemente, espera a sus hijas y propaga
+la cancelación. Un `for` que espera cada descarga antes de iniciar la siguiente
+sería secuencial. Se eligió TaskGroup para asegurar la limpieza del conjunto ante
+fallos inesperados, además de ejecutar concurrentemente como permite `gather`.
+
+Un HTTP 404 o 500 se devuelve como código en el resultado de esa URL; no se llama
+a `raise_for_status()`. Los errores de transporte se guardan en el campo `error`
+de cada URL y las demás descargas continúan. Por eso `completada` para una tarea
+de descargas significa que se elaboró el informe, no que todas sus URLs dieron 200.
+
+`calcular_hash` aplica SHA-256 al texto UTF-8 y después a los bytes del digest
+anterior; solo el último digest se convierte a hexadecimal. El bucle es síncrono
+y CPU-bound. Se invoca mediante `asyncio.to_thread`, que utiliza el executor de
+hilos, para no ejecutarlo directamente en el event loop. Esto está permitido por
+la consigna. El GIL limita el paralelismo CPU y puede aumentar la latencia: la
+medición demuestra capacidad de respuesta, no aceleración de los hashes.
+Un ProcessPoolExecutor sería una alternativa para paralelismo multinúcleo,
+a costa de comunicación entre procesos y una cancelación más compleja.
+
+### Cancelación, timeout y recursos
+
+Cada worker crea una Task hija para el trabajo actual. DELETE cancela esa hija,
+no el worker. Una tarea pendiente queda marcada como cancelada y se saltea al
+retirarla de la cola. Una tarea ya completada o fallida devuelve 409.
+
+Al cancelar una descarga, TaskGroup cancela sus corrutinas hijas y los bloques
+`async with` cierran las respuestas y el cliente. Al cancelar un hash, la función
+asíncrona activa la señal de parada y espera la salida del hilo. El bucle consulta
+la señal cada 1000 iteraciones. `shield` permite conservar la espera del cálculo
+para completar su limpieza: cancelar una Task no mata un hilo automáticamente.
+
+`asyncio.timeout` limita el trabajo desde que empieza a ejecutarse. Su vencimiento
+cancela la ejecución y se registra como `fallida` con motivo. La cancelación manual
+se registra como `cancelada`. El timeout predeterminado por tarea es 30 segundos;
+HTTPX además tiene un límite de 10 segundos para sus operaciones de red.
+La duración puede superar ligeramente el límite mientras se liberan recursos.
+
+### Excepciones de los workers
+
+Las excepciones ordinarias del trabajo se capturan, el registro pasa a `fallida`
+y el worker vuelve a la cola. `CancelledError` tiene manejo separado para
+distinguir cancelación del trabajo de cancelación del worker durante el apagado.
+
+Si una excepción escapa del bucle del worker —por ejemplo, un error fuera del
+bloque protegido— esa Task termina y el pool pierde capacidad. No hay supervisor
+que la reinicie. En el cierre se recogen las terminaciones con `gather`, pero eso
+no sustituye la supervisión durante la ejecución. Es una limitación de esta versión.
+
+## Conceptos del curso aplicados
+
+La relación siguiente usa las referencias de clases indicadas en la consigna:
+
+| Clases | Concepto | Aplicación en el código |
+|---|---|---|
+| 13–14 | Sockets TCP y servidores concurrentes | Uvicorn recibe HTTP sobre sockets; HTTPX abre conexiones para las descargas. No se implementa TCP manualmente. |
+| 17 | Multiplexación de I/O (`select`, `epoll`) | El event loop puede atender sockets listos mientras otras conexiones esperan; las bibliotecas abstraen el mecanismo del sistema. |
+| 18 | Corrutinas y event loop | `worker`, `ejecutar_espera` y los endpoints usan `async def`; `await` permite suspender sin bloquear el hilo. |
+| 19 | HTTP y FastAPI | Rutas, JSON, validación de pedidos y códigos 202, 404, 409, 422 y 503. |
+| 20–21 | Asyncio en red, colas y cancelación | `AsyncClient`, `asyncio.Queue`, TaskGroup, cancelación y timeout. |
+| 22 | Executors y `concurrent.futures` | `to_thread` delega el hash a un executor de hilos. |
+| Bloque 0 | Context managers y decoradores | `asynccontextmanager` define el lifespan; `async with` libera recursos y los decoradores registran rutas. |
+
+`asyncio.sleep` suspende una corrutina. `time.sleep` dentro de una corrutina
+bloquearía el hilo del event loop: por eso no se usa en los trabajos de la API.
+El script de mediciones usa esperas síncronas en su cliente externo, que es otro
+proceso y no el event loop del servidor medido.
+
+## Limitaciones conocidas
+
+- El estado vive en un único proceso. Los volcados se detectan pero no se restauran;
+  un cierre forzado como SIGKILL o un corte de energía puede perder cambios.
+- La cola y el historial crecen sin límite. Con 10.000 pedidos puede aumentar la
+  espera y el consumo de memoria; GET devuelve la lista completa sin paginación.
+- Cada trabajo admite hasta 20 URLs, pero no existe un límite global de descargas
+  independiente del número de workers. No hay límite total de bytes por URL.
+- Los hashes compiten por CPU y GIL. Más workers no garantizan mayor rendimiento.
+- No hay autenticación, rate limiting ni restricciones de destinos HTTP. Es un
+  servicio académico para ejecución controlada, no un servicio público preparado
+  para aceptar URLs arbitrarias de usuarios externos.
+- No hay reintentos ni supervisión que reponga workers caídos.
+- La escritura JSON puede fallar por permisos o falta de espacio. El log informa
+  el fallo de apagado; el archivo temporal evita publicar un JSON parcial, pero
+  no garantiza durabilidad ante fallas de energía.
+- El plazo de apagado limita la espera de trabajos; limpieza y escritura agregan
+  tiempo. Compose debe permitir suficiente margen antes de enviar SIGKILL.
+- Las mediciones son locales y con cargas controladas. No caracterizan Internet,
+  todas las cargas posibles ni los límites físicos absolutos de la máquina.
+
+## Lo que aprendí
+
+Con este TP terminé de entender mejor cómo funciona la programación asíncrona. Antes entendía más o menos qué hacían `async` y `await`, pero al tener que usarlos en un programa me quedó mucho más claro cómo se pueden manejar varias tareas sin que una bloquee a las demás.
+
+Lo que más me costó fue entender cómo funcionaban los workers y la cola de tareas, sobre todo por qué necesitábamos guardar las tareas en un diccionario si ya estaban en la cola. También me costó un poco entender cuándo usar `task_done()` y `join()`, pero a medida que fui probando el código lo fui entendiendo mejor.
+
+En las pruebas me sorprendió ver cómo se iban procesando las tareas y que, aunque una fallara, las demás podían seguir ejecutándose. Creo que ver el programa funcionando me ayudó mucho más que solamente leer la teoría.
