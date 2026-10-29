@@ -11,7 +11,8 @@ y apagado con volcado JSON implementados.
 
 Las tres mediciones obligatorias están ejecutadas y documentadas abajo.
 El informe técnico incluye decisiones de diseño, conceptos del curso y limitaciones.
-La reflexión personal está incorporada. Queda pendiente la revisión final del repositorio antes de entregar.
+La reflexión personal está incorporada. La revisión de ejecución desde una copia
+limpia del commit eaaec6a se realizó el 29/10/2026.
 
 ## Ejecutar en desarrollo
 
@@ -371,3 +372,24 @@ python verificar_recursos.py
 Comprueba cola llena, ausencia de registros de pedidos rechazados, hash conocido,
 cancelación de hashes activos y esperando capacidad, timeout, reutilización,
 límite de descargas entre dos trabajos y cierre sin procesos hijos vivos.
+
+## Revisión de entrega (29/10/2026)
+
+Se clonó el commit eaaec6a en una carpeta temporal, sin el entorno virtual ni
+los archivos no versionados del proyecto. Pasaron verificar_semana1.py y
+verificar_recursos.py usando el intérprete del entorno de desarrollo. Además,
+Docker Compose construyó e inició esa copia con sus propias dependencias;
+se comprobaron esperar, descargar y hashear por HTTP, apagado con JSON y
+detección del volcado al reiniciar. Los contenedores de revisión se eliminaron.
+
+El repositorio público es https://github.com/pilarmachinea/Computacion2.
+Para ejecutar después de clonarlo:
+
+```bash
+git clone https://github.com/pilarmachinea/Computacion2.git
+cd "Computacion2/TP 2"
+docker compose up --build
+```
+
+Las notas teóricas son material personal de estudio y no se requieren para
+construir la imagen ni ejecutar la API.
